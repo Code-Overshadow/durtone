@@ -1,0 +1,8 @@
+{
+  "name": "durtone",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "check": "bun run --filter '*' check"
+  }
+}

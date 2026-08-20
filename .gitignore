@@ -1,0 +1,9 @@
+.copilot
+
+/knowledge_base
+
+/node_modules
+
+/packages/database/node_modules
+
+.env
