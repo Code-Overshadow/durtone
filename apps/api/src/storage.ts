@@ -82,6 +82,25 @@ export async function authenticateAgentToken(token: string) {
   return key;
 }
 
+export type AgentEnrollmentSummary = {
+  id: string;
+  name: string;
+  revoked: boolean;
+  lastUsedAt: string | null;
+  createdAt: string;
+};
+
+export async function listAgentEnrollments(tenantId: string): Promise<AgentEnrollmentSummary[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<AgentEnrollmentSummary[]>`
+    select id, name, revoked, last_used_at as "lastUsedAt", created_at as "createdAt"
+    from api_keys
+    where tenant_id = ${tenantId}
+    order by created_at desc
+  `;
+}
+
 export async function revokeAgentEnrollment(tenantId: string, id: string) {
   const client = database();
   if (!client) return false;

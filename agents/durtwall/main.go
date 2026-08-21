@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"time"
 )
 
@@ -70,16 +71,26 @@ func loadConfigIfPresent(path string) (Config, error) {
 	return loadConfig(path)
 }
 
+type liveState struct {
+	mode     string
+	upstream string
+	proxy    *httputil.ReverseProxy
+}
+
 type proxyServer struct {
 	config   Config
-	proxy    *httputil.ReverseProxy
+	live     atomic.Pointer[liveState]
 	limiter  *tokenBucketLimiter
 	waf      *wafEngine
 	logger   *requestLogger
 	honeypot honeypotManager
+	stopPoll context.CancelFunc
 }
 
 func (server *proxyServer) close() {
+	if server.stopPoll != nil {
+		server.stopPoll()
+	}
 	if server.honeypot != nil {
 		server.honeypot.Close()
 	}
@@ -106,11 +117,15 @@ func newServer(config Config) (*proxyServer, error) {
 			return nil, fmt.Errorf("create honeypot manager: %w", err)
 		}
 	}
-	return &proxyServer{config: config, proxy: httputil.NewSingleHostReverseProxy(upstream), limiter: newTokenBucketLimiter(config.RateLimit, config.RateBurst), waf: waf, logger: logger, honeypot: honeypot}, nil
+	server := &proxyServer{config: config, limiter: newTokenBucketLimiter(config.RateLimit, config.RateBurst), waf: waf, logger: logger, honeypot: honeypot}
+	server.live.Store(&liveState{mode: config.Mode, upstream: config.Upstream, proxy: httputil.NewSingleHostReverseProxy(upstream)})
+	server.startConfigPolling()
+	return server, nil
 }
 
 func (server *proxyServer) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	started := time.Now()
+	state := server.live.Load()
 	if !server.limiter.allow(clientKey(request), started) {
 		server.logger.request(request, http.StatusTooManyRequests, elapsedMilliseconds(started), true, "rate_limit")
 		writeJSONError(writer, http.StatusTooManyRequests, "rate limit exceeded")
@@ -123,7 +138,7 @@ func (server *proxyServer) ServeHTTP(writer http.ResponseWriter, request *http.R
 			writeJSONError(writer, http.StatusServiceUnavailable, "honeypot unavailable")
 			return
 		}
-		if err := proxyToURL(server.proxy, honeypotURL, request, writer); err != nil {
+		if err := proxyToURL(state.proxy, honeypotURL, request, writer); err != nil {
 			server.logger.request(request, http.StatusBadGateway, elapsedMilliseconds(started), true, "honeypot_proxy_error")
 			writeJSONError(writer, http.StatusBadGateway, "honeypot proxy failed")
 			return
@@ -137,7 +152,7 @@ func (server *proxyServer) ServeHTTP(writer http.ResponseWriter, request *http.R
 		writeJSONError(writer, http.StatusInternalServerError, "WAF inspection failed")
 		return
 	}
-	if interruption != nil && server.config.Mode == "block" {
+	if interruption != nil && state.mode == "block" {
 		status := interruption.Status
 		if status == 0 {
 			status = http.StatusForbidden
@@ -153,7 +168,7 @@ func (server *proxyServer) ServeHTTP(writer http.ResponseWriter, request *http.R
 	}
 	if server.config.Honeytokens {
 		buffer := newBufferedResponseWriter()
-		server.proxy.ServeHTTP(buffer, request)
+		state.proxy.ServeHTTP(buffer, request)
 		body, injected := injectHoneytoken(buffer.body, buffer.header.Get("Content-Type"))
 		if injected {
 			buffer.body = body
@@ -164,7 +179,7 @@ func (server *proxyServer) ServeHTTP(writer http.ResponseWriter, request *http.R
 		return
 	}
 	statusWriter := &responseStatusWriter{ResponseWriter: writer}
-	server.proxy.ServeHTTP(statusWriter, request)
+	state.proxy.ServeHTTP(statusWriter, request)
 	server.logger.request(request, statusWriter.status(), elapsedMilliseconds(started), interruption != nil, reasonFor(interruption))
 }
 

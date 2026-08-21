@@ -12,9 +12,21 @@ type CspmDrift = { kind: "changed" | "new" | "missing"; resource: string; before
 type CspmSummary = { provider: string; accountId: string; postureScore: number; totalChecks: number; passChecks: number; failChecks: number; criticalFindings: number; driftCount: number; lastScanAt: string; drifts: CspmDrift[] };
 type SecurityScore = { score: number; components: { waf: number; cspm: number; itdr: number }; weights: { waf: number; cspm: number; itdr: number } };
 type Config = { upstream: string; mode: "block" | "monitor"; alertWebhookUrl?: string; identityProvider: "none" | "keycloak" | "okta" | "aws" | "google"; identityBaseUrl?: string; identityRealm?: string; identityTenant?: string; identityRegion?: string; identityClientId?: string; identityClientSecret?: string; identityAccessToken?: string };
+type AgentEnrollment = { id: string; name: string; revoked: boolean; lastUsedAt: string | null; createdAt: string };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 const emptyStats: Stats = { totalRequests: 0, blockedRequests: 0, discoveredEndpoints: 0, shadowApis: 0 };
+const AGENT_ONLINE_THRESHOLD_MS = 60_000;
+
+function describeAgentStatus(agents: AgentEnrollment[]) {
+  const active = agents.filter((agent) => !agent.revoked && agent.lastUsedAt);
+  if (!active.length) return { online: false, label: "Nenhum agente conectado" };
+  const mostRecent = active.reduce((latest, agent) => (new Date(agent.lastUsedAt!).getTime() > new Date(latest.lastUsedAt!).getTime() ? agent : latest));
+  const ageMs = Date.now() - new Date(mostRecent.lastUsedAt!).getTime();
+  if (ageMs < AGENT_ONLINE_THRESHOLD_MS) return { online: true, label: `${mostRecent.name} conectado` };
+  const minutes = Math.max(1, Math.round(ageMs / 60_000));
+  return { online: false, label: `${mostRecent.name} sem sinal há ${minutes}min` };
+}
 
 export function DashboardApp() {
   const [session, setSession] = useState<unknown>(null);
@@ -26,6 +38,7 @@ export function DashboardApp() {
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [cspm, setCspm] = useState<CspmSummary | null>(null);
+  const [agents, setAgents] = useState<AgentEnrollment[]>([]);
   const [securityScore, setSecurityScore] = useState<SecurityScore | null>(null);
   const [config, setConfig] = useState<Config>({ upstream: "http://localhost:3001", mode: "block", alertWebhookUrl: "", identityProvider: "none", identityBaseUrl: "", identityRealm: "", identityTenant: "", identityRegion: "us-east-1", identityClientId: "", identityClientSecret: "", identityAccessToken: "" });
   const [loading, setLoading] = useState(false);
@@ -61,10 +74,11 @@ export function DashboardApp() {
         fetch(`${apiUrl}/api/v1/config`, { headers }),
         fetch(`${apiUrl}/api/v1/cspm/summary`, { headers }),
         fetch(`${apiUrl}/api/v1/security/score`, { headers }),
+        fetch(`${apiUrl}/api/v1/agents`, { headers }),
       ]);
       if (responses.some((response) => !response.ok)) throw new Error("Control Plane indisponível");
-      const [nextStats, nextLogs, nextEndpoints, nextConfig, nextCspm, nextSecurityScore] = await Promise.all(responses.map((response) => response.json()));
-      setStats(nextStats); setLogs(nextLogs.logs ?? []); setEndpoints(nextEndpoints.endpoints ?? []); setConfig(nextConfig); setCspm(nextCspm); setSecurityScore(nextSecurityScore);
+      const [nextStats, nextLogs, nextEndpoints, nextConfig, nextCspm, nextSecurityScore, nextAgents] = await Promise.all(responses.map((response) => response.json()));
+      setStats(nextStats); setLogs(nextLogs.logs ?? []); setEndpoints(nextEndpoints.endpoints ?? []); setConfig(nextConfig); setCspm(nextCspm); setSecurityScore(nextSecurityScore); setAgents(nextAgents.agents ?? []);
     } catch (error) { setApiError(error instanceof Error ? error.message : "Falha ao carregar dados"); }
     finally { setLoading(false); }
   }
@@ -72,6 +86,7 @@ export function DashboardApp() {
   if (checkingSession) return <div className="auth-shell"><div className="loader-line" /></div>;
   if (!session) return <LoginScreen error={authError} onError={setAuthError} />;
 
+  const agentStatus = describeAgentStatus(agents);
   const navItems: { id: View; label: string; icon: typeof Gauge }[] = [
     { id: "overview", label: "Visão geral", icon: Gauge }, { id: "logs", label: "Eventos", icon: Activity },
     { id: "surface", label: "Superfície API", icon: FileSearch }, { id: "cspm", label: "CSPM", icon: Shield },
@@ -87,7 +102,7 @@ export function DashboardApp() {
       <div className="brand"><span className="brand-mark"><Shield size={17} /></span><span>DurtOne</span><button className="icon-button close-nav" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={17} /></button></div>
       <div className="tenant-switch"><span className="tenant-dot" /><span>Workspace principal</span><ChevronRight size={14} /></div>
       <nav>{navItems.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "nav-item active" : "nav-item"} onClick={() => { setView(id); setMobileNav(false); }}><Icon size={17} /><span>{label}</span>{id === "surface" && stats.shadowApis > 0 && <b>{stats.shadowApis}</b>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="agent-status"><span className="pulse" /><div><strong>DurtWall</strong><small>Agente conectado</small></div><CheckCircle2 size={16} /></div><button className="nav-item" onClick={() => void signOut()}><LogOut size={17} /><span>Sair</span></button></div>
+      <div className="sidebar-bottom"><div className={agentStatus.online ? "agent-status" : "agent-status offline"}><span className={agentStatus.online ? "pulse" : "pulse offline"} /><div><strong>DurtWall</strong><small>{agentStatus.label}</small></div>{agentStatus.online ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</div><button className="nav-item" onClick={() => void signOut()}><LogOut size={17} /><span>Sair</span></button></div>
     </aside>
     {mobileNav && <button className="nav-overlay" onClick={() => setMobileNav(false)} aria-label="Fechar navegação" />}
     <main className="main-area">

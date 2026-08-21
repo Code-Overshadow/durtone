@@ -3,7 +3,7 @@ import { getDiscoveryStats, ingestLogs, listEndpoints, listRequestLogs, replaceO
 import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
-import { createAgentEnrollment, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, listPersistedEndpoints, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, revokeAgentEnrollment, type PersistedScan } from './storage';
+import { createAgentEnrollment, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, listAgentEnrollments, listPersistedEndpoints, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, revokeAgentEnrollment, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -143,6 +143,14 @@ const app = new Elysia()
       return { error: 'agent enrollment storage is unavailable' };
     }
     return enrollment;
+  })
+  .get('/api/v1/agents', async ({ request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    return { agents: (await listAgentEnrollments(tenant.tenantId)) ?? [] };
   })
   .delete('/api/v1/agents/enrollment/:id', async ({ params, request, set }) => {
     const tenant = await requireTenant(request);
