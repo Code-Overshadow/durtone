@@ -76,7 +76,18 @@ Os containers usados no desenvolvimento (`durtone-postgres-dev` em `localhost:55
 bun run db:up    # ou: docker compose up -d
 ```
 
-Eles podem permanecer ativos entre sessões (`bun run db:down` para parar). Com as migrations aplicadas, execute a API com:
+Eles podem permanecer ativos entre sessões (`bun run db:down` para parar). Aplique as migrations (ainda não há um runner automático — é feito diretamente no Postgres do container) e semeie o tenant local de desenvolvimento:
+
+```powershell
+cd packages/database/drizzle
+Get-ChildItem *.sql | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw | docker exec -i durtone-postgres-dev psql -U postgres -d durtone -v ON_ERROR_STOP=1 }
+cd ../../../apps/api
+bun run db:seed
+```
+
+`bun run db:seed` cria a linha em `tenants` com o id de `DURTONE_TENANT_ID` (`00000000-0000-0000-0000-000000000001` por padrão) — sem isso, qualquer chamada que grave dado vinculado a esse tenant (ex. `POST /api/v1/agents/enrollment`) falha com violação de foreign key. É seguro rodar de novo a qualquer momento (idempotente).
+
+Com isso feito, execute a API:
 
 ```powershell
 cd apps/api

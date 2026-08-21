@@ -1,0 +1,2 @@
+ALTER TABLE "scans" ADD COLUMN "account_id" varchar(160) NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "endpoints_tenant_method_path_unique" ON "endpoints" USING btree ("tenant_id","method","path");

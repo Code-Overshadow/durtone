@@ -27,6 +27,7 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
   email: varchar('email', { length: 320 }).notNull(),
+  role: varchar('role', { length: 24 }).default('member').notNull(),
   ...timestamps,
 });
 
@@ -109,6 +110,79 @@ export const drifts = pgTable('drifts', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const cloudAccounts = pgTable('cloud_accounts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  provider: varchar('provider', { length: 32 }).notNull(),
+  accountId: varchar('account_id', { length: 160 }).notNull(),
+  displayName: varchar('display_name', { length: 160 }).notNull(),
+  credentialRef: text('credential_ref').notNull(),
+  regions: jsonb('regions').$type<string[]>().default([]).notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  lastScanAt: timestamp('last_scan_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => ({
+  tenantProviderAccountUnique: uniqueIndex('cloud_accounts_tenant_provider_account_unique').on(table.tenantId, table.provider, table.accountId),
+}));
+
+export const identityProviders = pgTable('identity_providers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  kind: varchar('kind', { length: 32 }).notNull(),
+  displayName: varchar('display_name', { length: 160 }).notNull(),
+  baseUrl: text('base_url'),
+  realmOrTenant: varchar('realm_or_tenant', { length: 160 }),
+  region: varchar('region', { length: 64 }),
+  clientId: varchar('client_id', { length: 320 }),
+  credentialRef: text('credential_ref').notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
+  ...timestamps,
+});
+
+export const identities = pgTable('identities', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  providerId: uuid('provider_id').references(() => identityProviders.id, { onDelete: 'cascade' }).notNull(),
+  externalId: varchar('external_id', { length: 255 }).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  kind: varchar('kind', { length: 24 }).notNull(),
+  status: varchar('status', { length: 16 }).notNull(),
+  permissions: jsonb('permissions').$type<string[]>().default([]).notNull(),
+  ipAddresses: jsonb('ip_addresses').$type<string[]>().default([]).notNull(),
+  riskScore: integer('risk_score').default(0).notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => ({
+  providerExternalIdUnique: uniqueIndex('identities_provider_external_id_unique').on(table.providerId, table.externalId),
+}));
+
+export const tenantInvitations = pgTable('tenant_invitations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  email: varchar('email', { length: 320 }).notNull(),
+  role: varchar('role', { length: 24 }).default('member').notNull(),
+  tokenHash: text('token_hash').notNull().unique(),
+  invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+});
+
+export const auditLogs = pgTable('audit_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  actorType: varchar('actor_type', { length: 16 }).notNull(),
+  actorId: varchar('actor_id', { length: 160 }).notNull(),
+  action: varchar('action', { length: 120 }).notNull(),
+  targetType: varchar('target_type', { length: 64 }),
+  targetId: varchar('target_id', { length: 160 }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}).notNull(),
+  previousHash: varchar('previous_hash', { length: 64 }),
+  hash: varchar('hash', { length: 64 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const tenantRelations = relations(tenants, ({ many }) => ({
   users: many(users),
   apiKeys: many(apiKeys),
@@ -118,6 +192,11 @@ export const tenantRelations = relations(tenants, ({ many }) => ({
   alerts: many(alerts),
   scans: many(scans),
   drifts: many(drifts),
+  cloudAccounts: many(cloudAccounts),
+  identityProviders: many(identityProviders),
+  identities: many(identities),
+  tenantInvitations: many(tenantInvitations),
+  auditLogs: many(auditLogs),
 }));
 
 export const userRelations = relations(users, ({ one }) => ({
@@ -126,4 +205,27 @@ export const userRelations = relations(users, ({ one }) => ({
 
 export const configRelations = relations(configs, ({ one }) => ({
   tenant: one(tenants, { fields: [configs.tenantId], references: [tenants.id] }),
+}));
+
+export const cloudAccountRelations = relations(cloudAccounts, ({ one }) => ({
+  tenant: one(tenants, { fields: [cloudAccounts.tenantId], references: [tenants.id] }),
+}));
+
+export const identityProviderRelations = relations(identityProviders, ({ one, many }) => ({
+  tenant: one(tenants, { fields: [identityProviders.tenantId], references: [tenants.id] }),
+  identities: many(identities),
+}));
+
+export const identityRelations = relations(identities, ({ one }) => ({
+  tenant: one(tenants, { fields: [identities.tenantId], references: [tenants.id] }),
+  provider: one(identityProviders, { fields: [identities.providerId], references: [identityProviders.id] }),
+}));
+
+export const tenantInvitationRelations = relations(tenantInvitations, ({ one }) => ({
+  tenant: one(tenants, { fields: [tenantInvitations.tenantId], references: [tenants.id] }),
+  invitedByUser: one(users, { fields: [tenantInvitations.invitedBy], references: [users.id] }),
+}));
+
+export const auditLogRelations = relations(auditLogs, ({ one }) => ({
+  tenant: one(tenants, { fields: [auditLogs.tenantId], references: [tenants.id] }),
 }));

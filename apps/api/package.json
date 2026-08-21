@@ -11,6 +11,7 @@
     "dev": "bun --watch src/index.ts",
     "check": "tsc --noEmit",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:seed": "bun --env-file=.env.dev scripts/seed-dev-tenant.ts",
     "test": "bun test"
   },
   "dependencies": {
