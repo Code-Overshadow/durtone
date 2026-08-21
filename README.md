@@ -61,6 +61,8 @@ Na Sprint 8 foram entregues o barramento de eventos com publicação Upstash Red
 
 O enrollment de agentes usa `POST /api/v1/agents/enrollment` com `{ "name": "durtwall-dev" }`. O token retornado deve ser guardado pelo operador e configurado como `DURTWALL_CONTROL_PLANE_TOKEN`, `DURTGUARDIAN_CONTROL_PLANE_TOKEN` ou `DURTSCOPE_CONTROL_PLANE_TOKEN`; ele é exibido apenas nessa resposta e armazenado no banco somente como hash.
 
+Com `control_plane_url`/`control_plane_token` configurados, o DurtWall busca `GET /api/v1/agents/config` a cada 15s e aplica `upstream`/`mode` em tempo real, sem reiniciar. Cada busca autentica com o token do agente, o que atualiza `api_keys.last_used_at` e funciona como heartbeat. `GET /api/v1/agents` lista os agentes do tenant com esse `lastUsedAt`, e o dashboard usa isso para mostrar o status real de conexão (em vez de um rótulo fixo).
+
 ## Banco de dados
 
 O schema Drizzle está em `packages/database/src/schema.ts` e a migration inicial em `packages/database/drizzle`.
