@@ -84,6 +84,7 @@ type tenantRoute struct {
 	stealth         bool
 	honeytokens     bool
 	proxy           *httputil.ReverseProxy
+	knownEndpoints  []knownEndpoint
 }
 
 type routingTable map[string]*tenantRoute
@@ -94,7 +95,7 @@ type proxyServer struct {
 	limiter  *tokenBucketLimiter
 	waf      *wafEngine
 	logger   *requestLogger
-	honeypot honeypotManager
+	honeypot honeypotStrategy
 	stopPoll context.CancelFunc
 }
 
@@ -102,9 +103,7 @@ func (server *proxyServer) close() {
 	if server.stopPoll != nil {
 		server.stopPoll()
 	}
-	if server.honeypot != nil {
-		server.honeypot.Close()
-	}
+	server.honeypot.Close()
 	_ = server.logger.close()
 }
 
@@ -117,12 +116,17 @@ func newServer(config Config) (*proxyServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	var honeypot honeypotManager
+	// The synthetic honeypot is the default: no external infra, works identically on a shared
+	// multi-tenant fleet. config.Honeypot opts into the isolated Docker-backed one instead, which
+	// needs a local Docker daemon (standalone/local use only) but is a more convincing decoy since
+	// it's a real, if shared, environment rather than a fabricated response.
+	var honeypot honeypotStrategy = newSyntheticHoneypot()
 	if config.Honeypot {
-		honeypot, err = newDockerHoneypotManager(config)
+		docker, err := newDockerHoneypotManager(config)
 		if err != nil {
 			return nil, fmt.Errorf("create honeypot manager: %w", err)
 		}
+		honeypot = docker
 	}
 	server := &proxyServer{config: config, limiter: newTokenBucketLimiter(config.RateLimit, config.RateBurst), waf: waf, logger: logger, honeypot: honeypot}
 	empty := routingTable{}
@@ -162,19 +166,14 @@ func (server *proxyServer) ServeHTTP(writer http.ResponseWriter, request *http.R
 		writeJSONError(writer, http.StatusTooManyRequests, "rate limit exceeded")
 		return
 	}
-	if server.honeypot != nil && isScanner(request) {
-		honeypotURL, _, err := server.honeypot.Start(context.Background())
+	if isScanner(request) {
+		status, err := server.honeypot.Respond(context.Background(), route, request, writer)
 		if err != nil {
 			server.logger.request(route.tenantID, request, http.StatusServiceUnavailable, elapsedMilliseconds(started), true, "honeypot_error")
 			writeJSONError(writer, http.StatusServiceUnavailable, "honeypot unavailable")
 			return
 		}
-		if err := proxyToURL(route.proxy, honeypotURL, request, writer); err != nil {
-			server.logger.request(route.tenantID, request, http.StatusBadGateway, elapsedMilliseconds(started), true, "honeypot_proxy_error")
-			writeJSONError(writer, http.StatusBadGateway, "honeypot proxy failed")
-			return
-		}
-		server.logger.request(route.tenantID, request, http.StatusOK, elapsedMilliseconds(started), true, "honeypot")
+		server.logger.request(route.tenantID, request, status, elapsedMilliseconds(started), true, "honeypot")
 		return
 	}
 	interruption, err := server.waf.inspect(request)

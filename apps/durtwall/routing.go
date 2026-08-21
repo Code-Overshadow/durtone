@@ -12,6 +12,12 @@ import (
 
 const routingPollInterval = 15 * time.Second
 
+type remoteEndpointHint struct {
+	Method     string `json:"method"`
+	Path       string `json:"path"`
+	Documented bool   `json:"documented"`
+}
+
 type remoteRoute struct {
 	Hostname        string                 `json:"hostname"`
 	TenantID        string                 `json:"tenantId"`
@@ -19,6 +25,10 @@ type remoteRoute struct {
 	Mode            string                 `json:"mode"`
 	AlertWebhookURL string                 `json:"alertWebhookUrl"`
 	Settings        map[string]interface{} `json:"settings"`
+	// KnownEndpoints is DurtShield's discovered-endpoint data for this tenant, used by the
+	// synthetic honeypot (honeypot.go) to mimic the tenant's real API shape instead of a generic
+	// decoy. Populated by apps/api's storage.listActiveRoutes.
+	KnownEndpoints []remoteEndpointHint `json:"knownEndpoints"`
 }
 
 type routingTableResponse struct {
@@ -91,6 +101,10 @@ func (server *proxyServer) applyRoutingTable(remoteRoutes []remoteRoute) {
 		if mode != "block" && mode != "monitor" {
 			mode = "block"
 		}
+		knownEndpoints := make([]knownEndpoint, 0, len(remote.KnownEndpoints))
+		for _, hint := range remote.KnownEndpoints {
+			knownEndpoints = append(knownEndpoints, knownEndpoint{method: hint.Method, path: hint.Path, documented: hint.Documented})
+		}
 		table[remote.Hostname] = &tenantRoute{
 			tenantID:        remote.TenantID,
 			mode:            mode,
@@ -99,6 +113,7 @@ func (server *proxyServer) applyRoutingTable(remoteRoutes []remoteRoute) {
 			stealth:         boolSetting(remote.Settings, "stealth"),
 			honeytokens:     boolSetting(remote.Settings, "honeytokens"),
 			proxy:           httputil.NewSingleHostReverseProxy(parsed),
+			knownEndpoints:  knownEndpoints,
 		}
 	}
 	server.routes.Store(&table)

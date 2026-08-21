@@ -459,6 +459,12 @@ export async function listPendingDomains(): Promise<PersistedDomain[] | undefine
   `;
 }
 
+export type EdgeRouteEndpointHint = {
+  method: string;
+  path: string;
+  documented: boolean;
+};
+
 export type EdgeRoute = {
   hostname: string;
   tenantId: string;
@@ -466,13 +472,21 @@ export type EdgeRoute = {
   mode: string;
   alertWebhookUrl: string | null;
   settings: Record<string, unknown>;
+  knownEndpoints: EdgeRouteEndpointHint[];
 };
 
-/** Active domain -> tenant config mapping the durtwall edge fleet polls to know how to route each Host. */
+const MAX_KNOWN_ENDPOINTS_PER_TENANT = 200;
+
+/**
+ * Active domain -> tenant config mapping the durtwall edge fleet polls to know how to route each
+ * Host. Also attaches each tenant's DurtShield-discovered endpoints (`knownEndpoints`), capped per
+ * tenant and ordered by observation count - the synthetic honeypot (apps/durtwall/honeypot.go)
+ * uses these to shape decoy responses after the tenant's real API instead of a generic fake.
+ */
 export async function listActiveRoutes(): Promise<EdgeRoute[]> {
   const client = database();
   if (!client) return [];
-  return client<EdgeRoute[]>`
+  const routes = await client<Omit<EdgeRoute, 'knownEndpoints'>[]>`
     select d.hostname, d.tenant_id as "tenantId", c.upstream, c.mode,
       c.alert_webhook_url as "alertWebhookUrl", c.settings
     from domains d
@@ -485,6 +499,25 @@ export async function listActiveRoutes(): Promise<EdgeRoute[]> {
     ) c on true
     where d.status = 'active'
   `;
+  if (routes.length === 0) return [];
+
+  const tenantIds = [...new Set(routes.map((route) => route.tenantId))];
+  const endpointRows = await client<Array<EdgeRouteEndpointHint & { tenantId: string }>>`
+    select tenant_id as "tenantId", method, path, documented
+    from endpoints
+    where tenant_id = any(${tenantIds})
+    order by count desc
+  `;
+  const endpointsByTenant = new Map<string, EdgeRouteEndpointHint[]>();
+  for (const row of endpointRows) {
+    const list = endpointsByTenant.get(row.tenantId) ?? [];
+    if (list.length < MAX_KNOWN_ENDPOINTS_PER_TENANT) {
+      list.push({ method: row.method, path: row.path, documented: row.documented });
+      endpointsByTenant.set(row.tenantId, list);
+    }
+  }
+
+  return routes.map((route) => ({ ...route, knownEndpoints: endpointsByTenant.get(route.tenantId) ?? [] }));
 }
 
 /**

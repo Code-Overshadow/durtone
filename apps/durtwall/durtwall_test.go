@@ -184,10 +184,29 @@ func TestStealthModeReturnsEmptyOK(t *testing.T) {
 	}
 }
 
+// fakeHoneypotManager proves honeypotStrategy is genuinely swappable (see honeypot.go) - a future
+// Fly Machines-backed strategy just needs to satisfy this same interface.
 type fakeHoneypotManager struct{}
 
-func (fakeHoneypotManager) Start(context.Context) (string, func(), error) {
-	return "http://honeypot.local", func() {}, nil
+func (fakeHoneypotManager) Respond(_ context.Context, _ *tenantRoute, _ *http.Request, writer http.ResponseWriter) (int, error) {
+	writer.WriteHeader(http.StatusTeapot)
+	return http.StatusTeapot, nil
 }
 
 func (fakeHoneypotManager) Close() {}
+
+func TestHoneypotStrategyIsSwappable(t *testing.T) {
+	server, err := newServer(defaultConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.close()
+	server.honeypot = fakeHoneypotManager{}
+	seedRoute(t, server, "durtwall.local", "tenant-1", "http://127.0.0.1:1", "block", false, false)
+
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://durtwall.local/admin/backup", nil))
+	if response.Code != http.StatusTeapot {
+		t.Fatalf("expected ServeHTTP to dispatch the scan to the swapped-in honeypot strategy, got %d", response.Code)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"net/netip"
 	"net/url"
 	"strings"
@@ -30,11 +31,9 @@ func isScanner(request *http.Request) bool {
 	return false
 }
 
-type honeypotManager interface {
-	Start(context.Context) (string, func(), error)
-	Close()
-}
-
+// dockerHoneypotManager implements honeypotStrategy (see honeypot.go) by proxying to a real,
+// isolated container - only viable where a local Docker daemon exists (standalone/local use, not
+// the shared multi-tenant fleet; see honeypot.go for why).
 type dockerHoneypotManager struct {
 	client *client.Client
 	image  string
@@ -90,6 +89,18 @@ func (manager *dockerHoneypotManager) Start(ctx context.Context) (string, func()
 		return "", nil, err
 	}
 	return manager.url, manager.stop, nil
+}
+
+func (manager *dockerHoneypotManager) Respond(ctx context.Context, _ *tenantRoute, request *http.Request, writer http.ResponseWriter) (int, error) {
+	honeypotURL, _, err := manager.Start(ctx)
+	if err != nil {
+		return 0, err
+	}
+	statusWriter := &responseStatusWriter{ResponseWriter: writer}
+	if err := proxyToURL(honeypotURL, request, statusWriter); err != nil {
+		return 0, err
+	}
+	return statusWriter.status(), nil
 }
 
 func (manager *dockerHoneypotManager) Close() {
@@ -174,13 +185,16 @@ func (writer *bufferedResponseWriter) flushTo(target http.ResponseWriter) {
 	_, _ = target.Write(writer.body)
 }
 
-func proxyToURL(proxy http.Handler, target string, request *http.Request, writer http.ResponseWriter) error {
+// proxyToURL builds its own one-off reverse proxy directed at target, rather than reusing the
+// tenant's real-upstream proxy with a rewritten request: httputil.NewSingleHostReverseProxy's
+// Director always forces the request back to the proxy's own configured target, so cloning the
+// request with a different URL (the previous approach) would have silently been overridden back
+// to the tenant's real upstream instead of the honeypot.
+func proxyToURL(target string, request *http.Request, writer http.ResponseWriter) error {
 	parsed, err := url.Parse(target)
 	if err != nil {
 		return err
 	}
-	clone := request.Clone(request.Context())
-	clone.URL.Scheme, clone.URL.Host = parsed.Scheme, parsed.Host
-	proxy.ServeHTTP(writer, clone)
+	httputil.NewSingleHostReverseProxy(parsed).ServeHTTP(writer, request)
 	return nil
 }

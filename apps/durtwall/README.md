@@ -54,11 +54,29 @@ Cada endpoint retornado inclui método, caminho, frequência, status codes e os 
 
 ## Deception
 
-`honeypot`/`honeypot_image`/`honeypot_port` continuam existindo no `config.yaml`, mas **honeypot
-dinâmico não é suportado no fleet gerenciado por agora** - ele depende de um daemon Docker local
-(`deception.go`, via Docker SDK) que não existe nas Fly Machines compartilhadas entre tenants.
-Adaptar isso pra Fly Machines API (VM efêmera em vez de container) é backlog. O código continua
-funcional e testado em modo standalone/local.
+Scanners (`isScanner`, `deception.go` - paths como `/admin`, `/backup`, `/.env`, `/.git`,
+`/wp-login`, `/phpmyadmin`, `/etc/passwd`) são desviados para um `honeypotStrategy`
+(`honeypot.go`) em vez de chegar no upstream real. Duas implementações:
 
-`stealth` e `honeytokens` (JSON `durtone_honeytoken` injetado em respostas de endpoints permitidos)
-já são por tenant, lidos de `settings` na tabela de roteamento - ver seção acima.
+- **`syntheticHoneypot` (padrão, sempre ativo, roda no fleet gerenciado)**: fabrica a resposta no
+  próprio processo, sem container/VM. Usa os endpoints que o DurtShield já descobriu daquele
+  tenant (`tenantRoute.knownEndpoints`, vindo de `endpoints` via a tabela de roteamento) pra
+  responder com o método/formato que um scanner esperaria da API real daquele tenant - por
+  exemplo, um scan em `/admin/users/999999` é respondido no formato de um `/admin/users/{id}`
+  documentado de verdade, se o tenant tiver um. Injeta o mesmo honeytoken (`injectHoneytoken`) que
+  respostas reais usam, então uma credencial "roubada" do honeypot é rastreável igual a uma
+  vazada de verdade.
+- **`dockerHoneypotManager` (`honeypot: true` no `config.yaml`, standalone/local apenas)**: sobe
+  um container real via Docker SDK e faz proxy pra ele - decoy mais convincente porque é um
+  ambiente de fato, mas exige daemon Docker local, que não existe numa Fly Machine compartilhada
+  entre tenants. Mantido funcional (`deception_test.go`) só pra esse cenário.
+
+As duas implementam a mesma interface `honeypotStrategy`, então uma futura estratégia baseada na
+**Fly Machines API** (uma VM efêmera de verdade por tenant, isolamento real, viável no fleet
+compartilhado onde Docker não é) entra no lugar sem precisar tocar em `ServeHTTP` - é o
+complemento natural para quando o decoy sintético não bastar (ex. um atacante que tenta manter
+sessão/navegar, não só bater um request isolado). Fica como próximo passo, não como bloqueio.
+
+`stealth` e `honeytokens` (JSON `durtone_honeytoken` injetado em respostas de endpoints permitidos,
+fora do fluxo de honeypot) já são por tenant, lidos de `settings` na tabela de roteamento - ver
+seção acima.

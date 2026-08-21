@@ -64,7 +64,7 @@ cd apps/durtwall
 go run . -discover -logs durtwall.jsonl -openapi openapi.json -output endpoints.json
 ```
 
-O callback de honeytokens está disponível em `POST /api/v1/honeytokens/callback`; os eventos recentes podem ser consultados em `GET /api/v1/honeytokens/callbacks`. Honeytokens e modo stealth agora são configuráveis por tenant (`settings.honeytokens`/`settings.stealth` na tabela de roteamento); honeypot dinâmico via Docker SDK **não é suportado no fleet gerenciado** (precisa de um daemon Docker local, que não existe nas Fly Machines compartilhadas) - fica em modo standalone/backlog, ver `apps/durtwall/README.md`.
+O callback de honeytokens está disponível em `POST /api/v1/honeytokens/callback`; os eventos recentes podem ser consultados em `GET /api/v1/honeytokens/callbacks`. Honeytokens e modo stealth agora são configuráveis por tenant (`settings.honeytokens`/`settings.stealth` na tabela de roteamento). Honeypot dinâmico roda no fleet gerenciado via um honeypot **sintético** (fabrica a resposta em processo, usando os endpoints que o DurtShield já descobriu daquele tenant, sem precisar de container/VM) - a versão anterior via Docker SDK continua existindo pra uso standalone/local, e ambas implementam a mesma interface pra permitir plugar uma versão baseada na Fly Machines API depois. Detalhes em `apps/durtwall/README.md`.
 
 DurtGuardian (CSPM) e DurtScope (ITDR) também rodam centralizados - consultam `cloud_accounts`/`identity_providers` de todos os tenants direto no Postgres (sem token de agente, sem push HTTP) e persistem `scans`/`identities` direto. `GET /api/v1/security/score` (score ponderado WAF/CSPM/ITDR) e `GET /api/v1/security/report.pdf` usam esses dados persistidos.
 
