@@ -1,6 +1,10 @@
 # DurtOne
 
-Monorepo inicial do DurtOne, Security Suite modular focado no MVP DurtWall + DurtShield.
+Monorepo do DurtOne, Security Suite modular 100% cloud: WAF+Deception (DurtWall/DurtShield), CSPM
+(DurtGuardian) e ITDR (DurtScope). Nenhum módulo é instalado pelo cliente - DurtGuardian/DurtScope
+rodam centralizados na nossa infra usando credenciais que o cliente cadastra no dashboard, e o
+DurtWall é um fleet de proxy gerenciado: o cliente aponta o DNS do próprio domínio (CNAME) pra
+gente, sem instalar nada.
 
 ## Desenvolvimento local
 
@@ -36,32 +40,33 @@ bun run dev
 
 O dashboard inicia em `http://localhost:3001`.
 
-DurtWall:
+DurtWall (fleet de edge proxy - roda na nossa infra, não na do cliente):
 
 ```powershell
-cd agents/durtwall
+cd apps/durtwall
 go run .
 ```
 
 Defina `PORT` para uma porta alternativa quando necessário, por exemplo `$env:PORT = "18080"`.
 
-O DurtWall aceita `config.yaml` com `upstream`, `port`, `mode` (`block` ou `monitor`), `rate_limit`, `rate_burst`, `request_body_max`, `rules_file` e `log_file`. O agente carrega o OWASP CRS embutido via Coraza, aplica regras SecLang locais e escreve logs JSON em stdout ou no arquivo configurado.
+O DurtWall aceita `config.yaml` com `port`, `rate_limit`, `rate_burst`, `request_body_max`, `rules_file`, `log_file`, `control_plane_url` e `fleet_token`. Ele carrega o OWASP CRS embutido via Coraza (motor compartilhado por todos os tenants nesta fase) e escreve logs JSON em stdout ou no arquivo configurado. **Não há mais `upstream`/`mode` no YAML** - isso vem por tenant da tabela de roteamento (ver abaixo), porque um único processo serve o domínio de qualquer tenant, resolvido pelo `Host` da requisição.
 
-Na Sprint 2 foram entregues o proxy reverso, inspeção WAF, token bucket por IP, configuração YAML, logs estruturados e builds Linux amd64/arm64. Descoberta de endpoints/DurtShield, TLS, decepção e integração com o Control Plane permanecem nas sprints seguintes.
+### Tabela de roteamento (substitui o antigo enrollment por tenant)
 
-Na Sprint 3 foram entregues o analisador DurtShield no agente e as rotas `POST /api/v1/ingest/logs`, `POST /api/v1/openapi` e `GET /api/v1/endpoints` no Control Plane. A agregação do Control Plane é em memória nesta etapa; a persistência nas tabelas `logs`/`endpoints`/`alerts` será adicionada com o repositório Drizzle.
+Com `control_plane_url`/`fleet_token` configurados, o DurtWall busca `GET /api/v1/edge/routing-table` a cada 15s - a lista de todos os domínios `active` com o config mais recente do tenant de cada um - e substitui a tabela inteira a cada poll (sem downtime, troca atômica). Cada requisição resolve o tenant pelo `Host` header; um `Host` sem domínio ativo correspondente recebe 404. `fleet_token` é um segredo único compartilhado entre a API e todo o fleet (`EDGE_FLEET_TOKEN` no `.env` da API) - não é mais um token por tenant.
 
-Na Sprint 4 foram entregues detectores de scanners, honeypot dinâmico via Docker SDK, readiness/cleanup do container, injeção de honeytokens em JSON e modo stealth para bloqueios WAF.
+Logs são enviados por `POST /api/v1/ingest/logs` com o mesmo `fleet_token`, e cada entrada carrega o `tenantId` resolvido (a API persiste cada uma no tenant certo).
 
-O callback de honeytokens está disponível em `POST /api/v1/honeytokens/callback`; os eventos recentes podem ser consultados em `GET /api/v1/honeytokens/callbacks`.
+DurtShield (análise de logs pra descobrir endpoints, roda em modo standalone/local, não pela tabela de roteamento):
 
-Na Sprint 5 foram entregues o dashboard MVP responsivo com login/cadastro Supabase, navegação por Visão geral, Eventos, Superfície API e Configuração, polling near real-time, métricas, eventos, Shadow APIs e edição do upstream/modo/webhook. A API oferece `GET /api/v1/stats`, `GET /api/v1/logs` e `GET/PUT /api/v1/config` para a interface.
+```powershell
+cd apps/durtwall
+go run . -discover -logs durtwall.jsonl -openapi openapi.json -output endpoints.json
+```
 
-Na Sprint 8 foram entregues o barramento de eventos com publicação Upstash Redis e fallback local, correlação DurtWall-DurtScope e DurtGuardian-DurtScope, o `GET /api/v1/security/score` com score ponderado WAF/CSPM/ITDR e o relatório executivo em `GET /api/v1/security/report.pdf`. Snapshots ITDR podem ser enviados por `POST /api/v1/itdr/identities` e drifts por `POST /api/v1/cspm/drifts`.
+O callback de honeytokens está disponível em `POST /api/v1/honeytokens/callback`; os eventos recentes podem ser consultados em `GET /api/v1/honeytokens/callbacks`. Honeytokens e modo stealth agora são configuráveis por tenant (`settings.honeytokens`/`settings.stealth` na tabela de roteamento); honeypot dinâmico via Docker SDK **não é suportado no fleet gerenciado** (precisa de um daemon Docker local, que não existe nas Fly Machines compartilhadas) - fica em modo standalone/backlog, ver `apps/durtwall/README.md`.
 
-O enrollment de agentes usa `POST /api/v1/agents/enrollment` com `{ "name": "durtwall-dev" }`. O token retornado deve ser guardado pelo operador e configurado como `DURTWALL_CONTROL_PLANE_TOKEN`, `DURTGUARDIAN_CONTROL_PLANE_TOKEN` ou `DURTSCOPE_CONTROL_PLANE_TOKEN`; ele é exibido apenas nessa resposta e armazenado no banco somente como hash.
-
-Com `control_plane_url`/`control_plane_token` configurados, o DurtWall busca `GET /api/v1/agents/config` a cada 15s e aplica `upstream`/`mode` em tempo real, sem reiniciar. Cada busca autentica com o token do agente, o que atualiza `api_keys.last_used_at` e funciona como heartbeat. `GET /api/v1/agents` lista os agentes do tenant com esse `lastUsedAt`, e o dashboard usa isso para mostrar o status real de conexão (em vez de um rótulo fixo).
+DurtGuardian (CSPM) e DurtScope (ITDR) também rodam centralizados - consultam `cloud_accounts`/`identity_providers` de todos os tenants direto no Postgres (sem token de agente, sem push HTTP) e persistem `scans`/`identities` direto. `GET /api/v1/security/score` (score ponderado WAF/CSPM/ITDR) e `GET /api/v1/security/report.pdf` usam esses dados persistidos.
 
 ## Banco de dados
 
@@ -85,12 +90,13 @@ cd ../../../apps/api
 bun run db:seed
 ```
 
-`bun run db:seed` cria a linha em `tenants` com o id de `DURTONE_TENANT_ID` (`00000000-0000-0000-0000-000000000001` por padrão) — sem isso, qualquer chamada que grave dado vinculado a esse tenant (ex. `POST /api/v1/agents/enrollment`) falha com violação de foreign key. É seguro rodar de novo a qualquer momento (idempotente).
+`bun run db:seed` cria a linha em `tenants` com o id de `DURTONE_TENANT_ID` (`00000000-0000-0000-0000-000000000001` por padrão) — sem isso, qualquer chamada que grave dado vinculado a esse tenant falha com violação de foreign key. É seguro rodar de novo a qualquer momento (idempotente).
 
-Com isso feito, execute a API:
+Com isso feito, execute a API (defina `EDGE_FLEET_TOKEN` pra poder testar o fleet do DurtWall):
 
 ```powershell
 cd apps/api
+$env:EDGE_FLEET_TOKEN = "dev-fleet-token"
 bun --env-file=.env.dev --watch src/index.ts
 ```
 
@@ -98,19 +104,25 @@ Smoke test básico:
 
 ```powershell
 Invoke-RestMethod http://localhost:3000/health
-Invoke-RestMethod -Method Post http://localhost:3000/api/v1/agents/enrollment -ContentType 'application/json' -Body '{"name":"durtwall-dev"}'
 ```
 
-Use o token retornado no header `Authorization: Bearer <token>` para testar ingestão, configuração e scans. Em staging/produção, configure Supabase Auth, `DURTONE_AUTH_REQUIRED=true`, Redis e secrets manager; não use `.env.dev`.
+Sem `FLY_API_TOKEN`/`FLY_APP_NAME` configurados, criar um domínio (`POST /api/v1/domains`) funciona mas fica em `pending_dns` com um erro claro em vez de emitir certificado de verdade — normal em dev local. Pra testar o fleet do DurtWall ponta a ponta localmente sem depender do Fly, insira uma linha em `configs`/`domains` direto no Postgres com `status = 'active'` e um hostname de teste, depois rode o proxy apontando pra API local:
 
-Para testar revogação: guarde o campo `id` retornado no enrollment, execute `Invoke-RestMethod -Method Delete http://localhost:3000/api/v1/agents/enrollment/<id>` com o token de usuário/ambiente local e confirme que o token do agente passa a retornar `Invalid or revoked agent token`.
+```powershell
+cd apps/durtwall
+$env:DURTWALL_CONTROL_PLANE_URL = "http://localhost:3000"
+$env:DURTWALL_FLEET_TOKEN = "dev-fleet-token"
+go run . -config config.yaml
+```
+
+Requisições com `Host: <o-hostname-de-teste>` na porta do proxy (8080 por padrão) são roteadas pro `upstream` daquele tenant; qualquer outro `Host` recebe 404. Em staging/produção, configure Supabase Auth, `DURTONE_AUTH_REQUIRED=true`, Redis e secrets manager; não use `.env.dev`.
 
 ## Checks
 
 ```powershell
 bun run --filter '*' check
 cd apps/dashboard; bun run build
-cd agents/durtwall; go vet ./...; go test ./...
+cd apps/durtwall; go vet ./...; go test ./...
 ```
 
 O quality gate usa checks nativos por stack; PMD Java não se aplica ao monorepo Bun/Next.js/Go.

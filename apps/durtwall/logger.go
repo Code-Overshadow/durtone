@@ -53,9 +53,9 @@ func (logger *requestLogger) close() error {
 	return logger.closer.Close()
 }
 
-func (logger *requestLogger) request(request *http.Request, status, duration int, blocked bool, reason string) {
-	event := map[string]interface{}{"timestamp": time.Now().UTC().Format(time.RFC3339Nano), "method": request.Method, "path": request.URL.Path, "query": request.URL.RawQuery, "remote_ip": clientKey(request), "status": status, "duration_ms": duration, "blocked": blocked, "reason": reason}
-	logger.logger.Info("request", "timestamp", event["timestamp"], "method", request.Method, "path", request.URL.Path, "query", request.URL.RawQuery, "remote_ip", clientKey(request), "status", status, "duration_ms", duration, "blocked", blocked, "reason", reason)
+func (logger *requestLogger) request(tenantID string, request *http.Request, status, duration int, blocked bool, reason string) {
+	event := map[string]interface{}{"tenantId": tenantID, "timestamp": time.Now().UTC().Format(time.RFC3339Nano), "method": request.Method, "path": request.URL.Path, "query": request.URL.RawQuery, "remote_ip": clientKey(request), "status": status, "duration_ms": duration, "blocked": blocked, "reason": reason}
+	logger.logger.Info("request", "tenant_id", tenantID, "timestamp", event["timestamp"], "method", request.Method, "path", request.URL.Path, "query", request.URL.RawQuery, "remote_ip", clientKey(request), "status", status, "duration_ms", duration, "blocked", blocked, "reason", reason)
 	if logger.shipQueue != nil {
 		if payload, err := json.Marshal(event); err == nil {
 			select {
