@@ -37,7 +37,7 @@ Before production deployment, configure Supabase Auth, a production PostgreSQL d
 
 ```powershell
 bun run --filter "*" check
-bun test apps/api/src apps/durtscope/src apps/durtguardian/src
+bun test apps/api/src apps/durtscope/src apps/durtguardian/src packages/crypto/src
 cd agents/durtwall
  go test ./...
  go vet ./...

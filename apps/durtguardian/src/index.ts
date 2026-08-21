@@ -1,65 +1,25 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { buildProwlerCommand, compareWithBaseline, computeBaselineHash, summarizeFindings, type ScanSnapshot } from './cspm';
+import { decryptSecret } from '@durtone/crypto';
+import { buildProwlerCommand, compareWithBaseline, computeBaselineHash, credentialEnv, summarizeFindings, type ScanSnapshot } from './cspm';
+import { getLatestScan, listDueCloudAccounts, persistScan, touchCloudAccountScan, type DueCloudAccount } from './storage';
 
-const CONFIG_PATH = process.env.DURTGUARDIAN_CONFIG ?? join(process.cwd(), 'durtguardian.json');
 const DEFAULT_INTERVAL_MS = Number(process.env.DURTGUARDIAN_INTERVAL_MS ?? 5 * 60 * 1000);
+// How long a cloud account can go unscanned before it's picked up again. Defaults to the tick
+// interval itself - one deliberately simple cadence instead of separate 5min/1h schedules.
+const STALE_MS = Number(process.env.DURTGUARDIAN_STALE_MS ?? DEFAULT_INTERVAL_MS);
 
-type GuardianConfig = {
-  provider: string;
-  accountId: string;
-  intervalMs?: number;
-  baselinePath?: string;
-  outputPath?: string;
-  controlPlaneUrl?: string;
-  controlPlaneToken?: string;
-};
-
-function readConfig(path: string): GuardianConfig {
-  if (!existsSync(path)) {
-    return {
-      provider: process.env.DURTGUARDIAN_PROVIDER ?? 'aws',
-      accountId: process.env.DURTGUARDIAN_ACCOUNT_ID ?? 'default',
-      intervalMs: DEFAULT_INTERVAL_MS,
-      baselinePath: process.env.DURTGUARDIAN_BASELINE_PATH ?? join(process.cwd(), 'baseline.json'),
-      outputPath: process.env.DURTGUARDIAN_OUTPUT_PATH ?? join(process.cwd(), 'latest-scan.json'),
-      controlPlaneUrl: process.env.DURTGUARDIAN_CONTROL_PLANE_URL,
-      controlPlaneToken: process.env.DURTGUARDIAN_CONTROL_PLANE_TOKEN,
-    };
-  }
-
-  const raw = readFileSync(path, 'utf8');
-  return JSON.parse(raw) as GuardianConfig;
-}
-
-async function publishScan(config: GuardianConfig, snapshot: ScanSnapshot, drifts: Array<{ kind: 'changed' | 'new' | 'missing'; resource: string; before?: string; after?: string }>) {
-  if (!config.controlPlaneUrl) return;
-  const response = await fetch(`${config.controlPlaneUrl.replace(/\/$/, '')}/api/v1/cspm/scans`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(config.controlPlaneToken ? { Authorization: `Bearer ${config.controlPlaneToken}` } : {}) },
-    body: JSON.stringify({ ...snapshot, baselineHash: computeBaselineHash(snapshot), drifts }),
-  });
-  if (!response.ok) throw new Error(`Control Plane scan upload failed: ${response.status} ${await response.text()}`);
-}
-
-function parseProwlerJson(raw: string): ScanSnapshot {
+function parseProwlerJson(raw: string, provider: string, accountId: string): ScanSnapshot {
   const parsed = JSON.parse(raw);
   const findings = Array.isArray(parsed) ? parsed : Array.isArray(parsed.findings) ? parsed.findings : [];
-
-  return {
-    provider: process.env.DURTGUARDIAN_PROVIDER ?? 'aws',
-    accountId: process.env.DURTGUARDIAN_ACCOUNT_ID ?? 'default',
-    timestamp: new Date().toISOString(),
-    findings,
-  };
+  return { provider, accountId, timestamp: new Date().toISOString(), findings };
 }
 
-async function runProwlerScan(provider: string, accountId: string): Promise<ScanSnapshot> {
+async function runProwlerScan(provider: string, accountId: string, decryptedCredential: string): Promise<ScanSnapshot> {
   const command = buildProwlerCommand({ provider, accountId, mode: 'baseline' });
   const child = Bun.spawn({
     cmd: command,
     stdout: 'pipe',
     stderr: 'pipe',
+    env: { ...process.env, ...credentialEnv(provider, decryptedCredential) },
   });
 
   const stdout = await new Response(child.stdout).text();
@@ -71,50 +31,62 @@ async function runProwlerScan(provider: string, accountId: string): Promise<Scan
   }
 
   try {
-    return parseProwlerJson(stdout);
+    return parseProwlerJson(stdout, provider, accountId);
   } catch (error) {
     throw new Error(`unable to parse Prowler output: ${String(error)}`);
   }
 }
 
-async function runCycle() {
-  const config = readConfig(CONFIG_PATH);
-  const snapshot = await runProwlerScan(config.provider, config.accountId);
+async function scanCloudAccount(account: DueCloudAccount) {
+  const credential = decryptSecret(account.credentialRef);
+  const snapshot = await runProwlerScan(account.provider, account.accountId, credential);
   const summary = summarizeFindings(snapshot.findings);
-  let drifts: Array<{ kind: 'changed' | 'new' | 'missing'; resource: string; before?: string; after?: string }> = [];
 
-  if (config.baselinePath && existsSync(config.baselinePath)) {
-    const previous = JSON.parse(readFileSync(config.baselinePath, 'utf8')) as ScanSnapshot;
-    drifts = compareWithBaseline(previous, snapshot);
-    console.log(JSON.stringify({
-      status: 'drift-check',
-      provider: snapshot.provider,
-      accountId: snapshot.accountId,
-      summary,
-      driftCount: drifts.length,
-      drifts,
-    }));
-  }
+  const previous = await getLatestScan(account.tenantId, account.provider, account.accountId);
+  const previousFindings = Array.isArray(previous?.findings) ? previous.findings : [];
+  const drifts = previous ? compareWithBaseline({ ...snapshot, findings: previousFindings }, snapshot) : [];
 
-  await publishScan(config, snapshot, drifts);
-
-  writeFileSync(config.outputPath ?? join(process.cwd(), 'latest-scan.json'), JSON.stringify(snapshot, null, 2));
-  writeFileSync(config.baselinePath ?? join(process.cwd(), 'baseline.json'), JSON.stringify(snapshot, null, 2));
-  console.log(JSON.stringify({
-    status: 'scan-complete',
+  await persistScan(account.tenantId, {
     provider: snapshot.provider,
     accountId: snapshot.accountId,
+    findings: snapshot.findings,
     baselineHash: computeBaselineHash(snapshot),
+    drifts,
+  });
+  await touchCloudAccountScan(account.id);
+
+  console.log(JSON.stringify({
+    status: 'scan-complete',
+    tenantId: account.tenantId,
+    provider: account.provider,
+    accountId: account.accountId,
+    displayName: account.displayName,
     summary,
+    driftCount: drifts.length,
   }));
 }
 
-if (import.meta.main) {
-  const config = readConfig(CONFIG_PATH);
-  console.log(`DurtGuardian active for ${config.provider}/${config.accountId}`);
-  void runCycle();
+export async function runCycle() {
+  const due = await listDueCloudAccounts(STALE_MS);
+  for (const account of due) {
+    try {
+      await scanCloudAccount(account);
+    } catch (error) {
+      console.error(JSON.stringify({
+        status: 'scan-failed',
+        tenantId: account.tenantId,
+        provider: account.provider,
+        accountId: account.accountId,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+}
 
+if (import.meta.main) {
+  console.log(`DurtGuardian worker started - centralized CSPM, checking every ${DEFAULT_INTERVAL_MS}ms`);
+  void runCycle();
   setInterval(() => {
     void runCycle();
-  }, config.intervalMs ?? DEFAULT_INTERVAL_MS);
+  }, DEFAULT_INTERVAL_MS);
 }

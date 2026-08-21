@@ -40,13 +40,62 @@ export function computeBaselineHash(snapshot: ScanSnapshot) {
 export function buildProwlerCommand(options: { provider: string; accountId?: string; mode?: string }) {
   const provider = options.provider ?? 'aws';
   const accountId = options.accountId ?? 'default';
-  const command = ['prowler', provider, '--account-id', accountId, '--output-formats', 'json'];
+  const command = ['prowler', provider];
+
+  if (provider === 'azure') {
+    command.push('--azure-subscription-ids', accountId);
+  } else if (provider === 'gcp') {
+    command.push('--gcp-project-ids', accountId);
+  } else {
+    command.push('--account-id', accountId);
+  }
+
+  command.push('--output-formats', 'json');
 
   if (options.mode === 'baseline') {
     command.push('--quiet');
   }
 
   return command;
+}
+
+export type CloudCredential = {
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  sessionToken?: string;
+  clientId?: string;
+  clientSecret?: string;
+  tenantId?: string;
+  credentialsPath?: string;
+};
+
+/**
+ * Maps the decrypted `cloud_accounts.credential_ref` JSON blob to the env vars
+ * each cloud provider's SDK (used internally by Prowler) expects.
+ */
+export function credentialEnv(provider: string, decrypted: string): Record<string, string> {
+  let credential: CloudCredential;
+  try {
+    credential = JSON.parse(decrypted) as CloudCredential;
+  } catch {
+    return {};
+  }
+
+  if (provider === 'azure') {
+    return {
+      AZURE_CLIENT_ID: credential.clientId ?? '',
+      AZURE_CLIENT_SECRET: credential.clientSecret ?? '',
+      AZURE_TENANT_ID: credential.tenantId ?? '',
+    };
+  }
+  if (provider === 'gcp') {
+    return { GOOGLE_APPLICATION_CREDENTIALS: credential.credentialsPath ?? '' };
+  }
+  return {
+    AWS_ACCESS_KEY_ID: credential.accessKeyId ?? '',
+    AWS_SECRET_ACCESS_KEY: credential.secretAccessKey ?? '',
+    ...(credential.sessionToken ? { AWS_SESSION_TOKEN: credential.sessionToken } : {}),
+  };
 }
 
 export function summarizeFindings(findings: ProwlerFinding[]) {

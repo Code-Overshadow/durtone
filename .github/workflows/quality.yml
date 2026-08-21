@@ -17,7 +17,7 @@ jobs:
           go-version-file: agents/durtwall/go.mod
       - run: bun install --frozen-lockfile
       - run: bun run --filter '*' check
-      - run: bun test apps/api/src apps/durtscope/src apps/durtguardian/src
+      - run: bun test apps/api/src apps/durtscope/src apps/durtguardian/src packages/crypto/src
       - run: go test ./...
         working-directory: agents/durtwall
       - run: go vet ./...

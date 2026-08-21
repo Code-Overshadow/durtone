@@ -3,6 +3,7 @@ import {
   buildProwlerCommand,
   compareWithBaseline,
   computeBaselineHash,
+  credentialEnv,
   summarizeFindings,
 } from './cspm';
 
@@ -11,7 +12,26 @@ test('buildProwlerCommand includes provider and output format', () => {
 
   expect(command[0]).toBe('prowler');
   expect(command[1]).toBe('aws');
+  expect(command.includes('--account-id')).toBe(true);
   expect(command.includes('--output-formats')).toBe(true);
+});
+
+test('buildProwlerCommand maps Azure and GCP to their own account flags', () => {
+  const azure = buildProwlerCommand({ provider: 'azure', accountId: 'sub-123' });
+  expect(azure).toEqual(['prowler', 'azure', '--azure-subscription-ids', 'sub-123', '--output-formats', 'json']);
+
+  const gcp = buildProwlerCommand({ provider: 'gcp', accountId: 'project-123' });
+  expect(gcp).toEqual(['prowler', 'gcp', '--gcp-project-ids', 'project-123', '--output-formats', 'json']);
+});
+
+test('credentialEnv maps decrypted credentials to provider-specific env vars', () => {
+  const aws = credentialEnv('aws', JSON.stringify({ accessKeyId: 'AKIA...', secretAccessKey: 'secret', sessionToken: 'token' }));
+  expect(aws).toEqual({ AWS_ACCESS_KEY_ID: 'AKIA...', AWS_SECRET_ACCESS_KEY: 'secret', AWS_SESSION_TOKEN: 'token' });
+
+  const azure = credentialEnv('azure', JSON.stringify({ clientId: 'id', clientSecret: 'secret', tenantId: 'tenant' }));
+  expect(azure).toEqual({ AZURE_CLIENT_ID: 'id', AZURE_CLIENT_SECRET: 'secret', AZURE_TENANT_ID: 'tenant' });
+
+  expect(credentialEnv('aws', 'not-json')).toEqual({});
 });
 
 test('baseline hash is stable for equivalent findings', () => {
