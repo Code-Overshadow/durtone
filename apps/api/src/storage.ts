@@ -213,7 +213,12 @@ export async function getPersistedDiscoveryStats(tenantId: string) {
     select count(*)::int as "discoveredEndpoints", count(*) filter (where shadow)::int as "shadowApis"
     from endpoints where tenant_id = ${tenantId}
   `;
-  return { ...requestStats, ...endpointStats };
+  return {
+    totalRequests: requestStats?.totalRequests ?? 0,
+    blockedRequests: requestStats?.blockedRequests ?? 0,
+    discoveredEndpoints: endpointStats?.discoveredEndpoints ?? 0,
+    shadowApis: endpointStats?.shadowApis ?? 0,
+  };
 }
 
 export async function persistScan(tenantId: string, scan: PersistedScan) {

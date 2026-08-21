@@ -16,10 +16,12 @@ const port = Number(process.env.PORT ?? 3000);
 const correlations: Array<Record<string, unknown>> = [];
 
 onEvent('waf.attack', (event) => {
-  correlations.push({ eventId: event.id, source: 'durtwall', result: correlateWafAttack(event.payload as WafAttack, listSecurityIdentities()) });
+  if (!event.tenantId) return;
+  correlations.push({ eventId: event.id, source: 'durtwall', result: correlateWafAttack(event.payload as WafAttack, listSecurityIdentities(event.tenantId)) });
 });
 onEvent('cspm.drift', (event) => {
-  correlations.push({ eventId: event.id, source: 'durtguardian', result: correlateGuardianChange(event.payload as CspmChange, listSecurityIdentities()) });
+  if (!event.tenantId) return;
+  correlations.push({ eventId: event.id, source: 'durtguardian', result: correlateGuardianChange(event.payload as CspmChange, listSecurityIdentities(event.tenantId)) });
 });
 
 const app = new Elysia()
@@ -77,7 +79,7 @@ const app = new Elysia()
       await persistEndpoints(tenant.tenantId, listEndpoints());
       for (const entry of entries as Array<{ remoteIp?: string; remote_ip?: string; blocked?: boolean; path?: string; reason?: string }>) {
         const remoteIp = entry.remoteIp ?? entry.remote_ip;
-        if (entry.blocked && remoteIp) void publishEvent({ type: 'waf.attack', payload: { remoteIp, blocked: true, path: entry.path, reason: entry.reason } });
+        if (entry.blocked && remoteIp) void publishEvent({ type: 'waf.attack', tenantId: tenant.tenantId, payload: { remoteIp, blocked: true, path: entry.path, reason: entry.reason } });
       }
       return { accepted: count };
     } catch {
@@ -189,17 +191,29 @@ const app = new Elysia()
     for (const drift of scan.drifts ?? []) void publishEvent({ type: 'cspm.drift', tenantId: tenant.tenantId, payload: drift });
     return { accepted: true };
   })
-  .post('/api/v1/itdr/identities', ({ body, set }) => {
+  .post('/api/v1/itdr/identities', async ({ body, request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
     try {
-      const identities = replaceSecurityIdentities(body);
-      void publishEvent({ type: 'itdr.snapshot', payload: { totalIdentities: identities.length } });
+      const identities = replaceSecurityIdentities(tenant.tenantId, body);
+      void publishEvent({ type: 'itdr.snapshot', tenantId: tenant.tenantId, payload: { totalIdentities: identities.length } });
       return { accepted: identities.length };
     } catch {
       set.status = 400;
       return { error: 'invalid identity snapshot' };
     }
   })
-  .get('/api/v1/itdr/identities', () => ({ identities: listSecurityIdentities() }))
+  .get('/api/v1/itdr/identities', async ({ request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    return { identities: listSecurityIdentities(tenant.tenantId) };
+  })
   .post('/api/v1/cspm/drifts', ({ body, set }) => {
     try {
       const change = body as CspmChange;
@@ -211,10 +225,30 @@ const app = new Elysia()
       return { error: 'invalid CSPM drift' };
     }
   })
-  .get('/api/v1/security/score', () => calculateSecurityScore({ waf: getDiscoveryStats(), cspm: getCspmSummary(), itdr: getIdentityHygiene() }))
+  .get('/api/v1/security/score', async ({ request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    return calculateSecurityScore({
+      waf: (await getPersistedDiscoveryStats(tenant.tenantId)) ?? getDiscoveryStats(),
+      cspm: (await getPersistedCspmSummary(tenant.tenantId)) ?? getCspmSummary(),
+      itdr: getIdentityHygiene(tenant.tenantId),
+    });
+  })
   .get('/api/v1/security/correlations', () => ({ correlations: correlations.slice(-100).reverse() }))
-  .get('/api/v1/security/report.pdf', async ({ set }) => {
-    const pdf = await buildExecutiveReport(calculateSecurityScore({ waf: getDiscoveryStats(), cspm: getCspmSummary(), itdr: getIdentityHygiene() }));
+  .get('/api/v1/security/report.pdf', async ({ request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const pdf = await buildExecutiveReport(calculateSecurityScore({
+      waf: (await getPersistedDiscoveryStats(tenant.tenantId)) ?? getDiscoveryStats(),
+      cspm: (await getPersistedCspmSummary(tenant.tenantId)) ?? getCspmSummary(),
+      itdr: getIdentityHygiene(tenant.tenantId),
+    }));
     set.headers['Content-Type'] = 'application/pdf';
     set.headers['Content-Disposition'] = 'attachment; filename="durtone-security-report.pdf"';
     return new Response(pdf);
