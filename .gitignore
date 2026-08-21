@@ -12,9 +12,9 @@ coverage/
 .vercel/
 
 # Go build output
-agents/durtwall/durtwall
-agents/durtwall/*.exe
-agents/durtwall/durtwall-linux-*
+apps/durtwall/durtwall
+apps/durtwall/*.exe
+apps/durtwall/durtwall-linux-*
 
 /knowledge_base
 

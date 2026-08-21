@@ -14,13 +14,13 @@ jobs:
           bun-version: latest
       - uses: actions/setup-go@v5
         with:
-          go-version-file: agents/durtwall/go.mod
+          go-version-file: apps/durtwall/go.mod
       - run: bun install --frozen-lockfile
       - run: bun run --filter '*' check
       - run: bun test apps/api/src apps/durtscope/src apps/durtguardian/src packages/crypto/src packages/identity-providers/src
       - run: go test ./...
-        working-directory: agents/durtwall
+        working-directory: apps/durtwall
       - run: go vet ./...
-        working-directory: agents/durtwall
+        working-directory: apps/durtwall
       - run: bun run build
         working-directory: apps/dashboard
