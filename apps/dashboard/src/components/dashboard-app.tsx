@@ -1,8 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Activity, AlertTriangle, ArrowUpRight, CheckCircle2, ChevronRight, FileSearch, Gauge, LogOut, Menu, RefreshCw, Save, Shield, Terminal, X } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { apiDownload, apiGet, apiPut } from "@/lib/api/client";
+import { usePollingResource } from "@/hooks/use-polling-resource";
+import { useEditableResource } from "@/hooks/use-editable-resource";
+import { useSupabaseSession } from "@/hooks/use-supabase-session";
 
 type View = "overview" | "logs" | "surface" | "settings" | "cspm" | "security";
 type Stats = { totalRequests: number; blockedRequests: number; discoveredEndpoints: number; shadowApis: number };
@@ -14,7 +18,6 @@ type SecurityScore = { score: number; components: { waf: number; cspm: number; i
 type Config = { upstream: string; mode: "block" | "monitor"; alertWebhookUrl?: string; identityProvider: "none" | "keycloak" | "okta" | "aws" | "google"; identityBaseUrl?: string; identityRealm?: string; identityTenant?: string; identityRegion?: string; identityClientId?: string; identityClientSecret?: string; identityAccessToken?: string };
 type AgentEnrollment = { id: string; name: string; revoked: boolean; lastUsedAt: string | null; createdAt: string };
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 const emptyStats: Stats = { totalRequests: 0, blockedRequests: 0, discoveredEndpoints: 0, shadowApis: 0 };
 const AGENT_ONLINE_THRESHOLD_MS = 60_000;
 
@@ -29,58 +32,37 @@ function describeAgentStatus(agents: AgentEnrollment[]) {
 }
 
 export function DashboardApp() {
-  const [session, setSession] = useState<unknown>(null);
-  const [checkingSession, setCheckingSession] = useState(true);
+  const { session, checkingSession, signOut } = useSupabaseSession();
   const [authError, setAuthError] = useState("");
   const [view, setView] = useState<View>("overview");
   const [mobileNav, setMobileNav] = useState(false);
-  const [stats, setStats] = useState(emptyStats);
-  const [logs, setLogs] = useState<RequestLog[]>([]);
-  const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
-  const [cspm, setCspm] = useState<CspmSummary | null>(null);
-  const [agents, setAgents] = useState<AgentEnrollment[]>([]);
-  const [securityScore, setSecurityScore] = useState<SecurityScore | null>(null);
-  const [config, setConfig] = useState<Config>({ upstream: "http://localhost:3001", mode: "block", alertWebhookUrl: "", identityProvider: "none", identityBaseUrl: "", identityRealm: "", identityTenant: "", identityRegion: "us-east-1", identityClientId: "", identityClientSecret: "", identityAccessToken: "" });
-  const [loading, setLoading] = useState(false);
-  const [apiError, setApiError] = useState("");
 
-  useEffect(() => {
-    let active = true;
-    try {
-      const supabase = createSupabaseBrowserClient();
-      supabase.auth.getSession().then(({ data }) => { if (active) { setSession(data.session); setCheckingSession(false); } });
-      const subscription = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-      return () => { active = false; subscription.data.subscription.unsubscribe(); };
-    } catch { window.setTimeout(() => setCheckingSession(false), 0); }
-  }, []);
+  const enabled = Boolean(session);
+  const statsResource = usePollingResource(() => apiGet<Stats>("/api/v1/stats"), { enabled });
+  const logsResource = usePollingResource(() => apiGet<{ logs: RequestLog[] }>("/api/v1/logs"), { enabled });
+  const endpointsResource = usePollingResource(() => apiGet<{ endpoints: Endpoint[] }>("/api/v1/endpoints"), { enabled });
+  const cspmResource = usePollingResource(() => apiGet<CspmSummary>("/api/v1/cspm/summary"), { enabled });
+  const securityScoreResource = usePollingResource(() => apiGet<SecurityScore>("/api/v1/security/score"), { enabled });
+  const agentsResource = usePollingResource(() => apiGet<{ agents: AgentEnrollment[] }>("/api/v1/agents"), { enabled });
+  const configResource = useEditableResource<Config>({
+    fetcher: () => apiGet<Config>("/api/v1/config"),
+    saver: (value) => apiPut<Config>("/api/v1/config", value),
+  });
 
-  useEffect(() => {
-    if (!session) return;
-    void refreshData();
-    const timer = window.setInterval(() => void refreshData(), 15000);
-    return () => window.clearInterval(timer);
-  }, [session]);
+  const stats = statsResource.data ?? emptyStats;
+  const logs = logsResource.data?.logs ?? [];
+  const endpoints = endpointsResource.data?.endpoints ?? [];
+  const agents = agentsResource.data?.agents ?? [];
+  const loading = statsResource.loading || logsResource.loading || endpointsResource.loading || cspmResource.loading || securityScoreResource.loading || agentsResource.loading;
+  const apiError = statsResource.error || logsResource.error || endpointsResource.error || cspmResource.error || securityScoreResource.error || agentsResource.error;
 
-  async function refreshData() {
-    setLoading(true); setApiError("");
-    try {
-      const sessionResult = await createSupabaseBrowserClient().auth.getSession();
-      const headers: Record<string, string> = {};
-      if (sessionResult.data.session?.access_token) headers.Authorization = `Bearer ${sessionResult.data.session.access_token}`;
-      const responses = await Promise.all([
-        fetch(`${apiUrl}/api/v1/stats`, { headers }),
-        fetch(`${apiUrl}/api/v1/logs`, { headers }),
-        fetch(`${apiUrl}/api/v1/endpoints`, { headers }),
-        fetch(`${apiUrl}/api/v1/config`, { headers }),
-        fetch(`${apiUrl}/api/v1/cspm/summary`, { headers }),
-        fetch(`${apiUrl}/api/v1/security/score`, { headers }),
-        fetch(`${apiUrl}/api/v1/agents`, { headers }),
-      ]);
-      if (responses.some((response) => !response.ok)) throw new Error("Control Plane indisponível");
-      const [nextStats, nextLogs, nextEndpoints, nextConfig, nextCspm, nextSecurityScore, nextAgents] = await Promise.all(responses.map((response) => response.json()));
-      setStats(nextStats); setLogs(nextLogs.logs ?? []); setEndpoints(nextEndpoints.endpoints ?? []); setConfig(nextConfig); setCspm(nextCspm); setSecurityScore(nextSecurityScore); setAgents(nextAgents.agents ?? []);
-    } catch (error) { setApiError(error instanceof Error ? error.message : "Falha ao carregar dados"); }
-    finally { setLoading(false); }
+  function refreshAll() {
+    void statsResource.refresh();
+    void logsResource.refresh();
+    void endpointsResource.refresh();
+    void cspmResource.refresh();
+    void securityScoreResource.refresh();
+    void agentsResource.refresh();
   }
 
   if (checkingSession) return <div className="auth-shell"><div className="loader-line" /></div>;
@@ -93,9 +75,15 @@ export function DashboardApp() {
     { id: "security", label: "Security Score", icon: Gauge },
     { id: "settings", label: "Configuração", icon: Shield },
   ];
-  async function signOut() { await createSupabaseBrowserClient().auth.signOut(); setSession(null); }
-  async function saveConfig(event: FormEvent) { event.preventDefault(); try { const sessionResult = await createSupabaseBrowserClient().auth.getSession(); const authorization: Record<string, string> = {}; if (sessionResult.data.session?.access_token) authorization.Authorization = `Bearer ${sessionResult.data.session.access_token}`; const response = await fetch(`${apiUrl}/api/v1/config`, { method: "PUT", headers: { "Content-Type": "application/json", ...authorization }, body: JSON.stringify(config) }); if (!response.ok) throw new Error("Configuração inválida"); setConfig(await response.json()); } catch (error) { setApiError(error instanceof Error ? error.message : "Falha ao salvar"); } }
-  async function downloadReport() { try { const sessionResult = await createSupabaseBrowserClient().auth.getSession(); const authorization: Record<string, string> = {}; if (sessionResult.data.session?.access_token) authorization.Authorization = `Bearer ${sessionResult.data.session.access_token}`; const response = await fetch(`${apiUrl}/api/v1/security/report.pdf`, { headers: authorization }); if (!response.ok) throw new Error("Não foi possível gerar o relatório"); const url = URL.createObjectURL(await response.blob()); const link = document.createElement("a"); link.href = url; link.download = "durtone-security-report.pdf"; link.click(); URL.revokeObjectURL(url); } catch (error) { setApiError(error instanceof Error ? error.message : "Falha ao gerar relatório"); } }
+  async function downloadReport() {
+    try {
+      const blob = await apiDownload("/api/v1/security/report.pdf");
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = "durtone-security-report.pdf"; link.click();
+      URL.revokeObjectURL(url);
+    } catch { /* surfaced via securityScoreResource.error path is not applicable here; ignore silently for a best-effort download */ }
+  }
 
   return <div className="dashboard-shell">
     <aside className={mobileNav ? "sidebar sidebar-open" : "sidebar"}>
@@ -106,14 +94,14 @@ export function DashboardApp() {
     </aside>
     {mobileNav && <button className="nav-overlay" onClick={() => setMobileNav(false)} aria-label="Fechar navegação" />}
     <main className="main-area">
-      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileNav(true)} aria-label="Abrir menu"><Menu size={20} /></button><div><p className="eyebrow">SECURITY OPERATIONS</p><h1>{navItems.find((item) => item.id === view)?.label}</h1></div><div className="top-actions"><span className="live-indicator"><span className="pulse" /> ao vivo</span><button className="icon-button" onClick={() => void refreshData()} disabled={loading} aria-label="Atualizar dados"><RefreshCw size={17} className={loading ? "spin" : ""} /></button></div></header>
+      <header className="topbar"><button className="icon-button menu-button" onClick={() => setMobileNav(true)} aria-label="Abrir menu"><Menu size={20} /></button><div><p className="eyebrow">SECURITY OPERATIONS</p><h1>{navItems.find((item) => item.id === view)?.label}</h1></div><div className="top-actions"><span className="live-indicator"><span className="pulse" /> ao vivo</span><button className="icon-button" onClick={refreshAll} disabled={loading} aria-label="Atualizar dados"><RefreshCw size={17} className={loading ? "spin" : ""} /></button></div></header>
       {apiError && <div className="notice error"><AlertTriangle size={16} />{apiError}</div>}
       {view === "overview" && <Overview stats={stats} logs={logs} endpoints={endpoints} onNavigate={setView} />}
       {view === "logs" && <LogsView logs={logs} />}
       {view === "surface" && <SurfaceView endpoints={endpoints} />}
-      {view === "cspm" && <CspmView summary={cspm} />}
-      {view === "security" && <SecurityScoreView score={securityScore} onDownload={downloadReport} />}
-      {view === "settings" && <SettingsView config={config} setConfig={setConfig} onSubmit={saveConfig} />}
+      {view === "cspm" && <CspmView summary={cspmResource.data} />}
+      {view === "security" && <SecurityScoreView score={securityScoreResource.data} onDownload={downloadReport} />}
+      {view === "settings" && <SettingsView resource={configResource} />}
     </main>
   </div>;
 }
@@ -128,5 +116,20 @@ function SurfaceView({ endpoints }: { endpoints: Endpoint[] }) { return <div cla
 function CspmView({ summary }: { summary: CspmSummary | null }) { const metrics = summary ?? { provider: "aws", accountId: "n/a", postureScore: 0, totalChecks: 0, passChecks: 0, failChecks: 0, criticalFindings: 0, driftCount: 0, lastScanAt: new Date().toISOString(), drifts: [] };
   return <div className="content"><div className="section-heading"><div><span className="section-kicker">DURTGUARDIAN</span><h3>CSPM e drift</h3></div><span className="count-label">{metrics.provider}/{metrics.accountId}</span></div><div className="metric-grid"><Metric label="Postura" value={metrics.postureScore} delta="score global" icon={Gauge} accent="teal" /><Metric label="Checks" value={metrics.totalChecks} delta={`${metrics.passChecks} OK`} icon={CheckCircle2} accent="mint" /><Metric label="Falhas" value={metrics.failChecks} delta={`${metrics.criticalFindings} críticas`} icon={AlertTriangle} accent="coral" /><Metric label="Drifts" value={metrics.driftCount} delta="mudanças detectadas" icon={Shield} accent="yellow" /></div><div className="panel table-panel"><div className="table-head"><span>Recurso</span><span>Tipo</span><span>Antes</span><span>Depois</span></div>{metrics.drifts.length ? metrics.drifts.map((drift) => <div className="table-row" key={`${drift.resource}-${drift.kind}`}><div className="event-main"><strong>{drift.resource}</strong><code>{new Date(metrics.lastScanAt).toLocaleString("pt-BR")}</code></div><span className={drift.kind === "new" ? "status-tag shadow" : drift.kind === "missing" ? "status-tag documented" : "status-tag"}>{drift.kind}</span><span>{drift.before ?? "—"}</span><span>{drift.after ?? "—"}</span></div>) : <EmptyState label="Sem drifts detectados" />}</div></div>; }
 function SecurityScoreView({ score, onDownload }: { score: SecurityScore | null; onDownload: () => void }) { const current = score ?? { score: 0, components: { waf: 0, cspm: 0, itdr: 0 }, weights: { waf: 0.4, cspm: 0.3, itdr: 0.3 } }; return <div className="content"><div className="section-heading"><div><span className="section-kicker">CORRELAÇÃO</span><h3>Security Score unificado</h3><p className="muted">WAF, postura cloud e higiene de identidades em uma única leitura.</p></div><button className="primary-button" onClick={onDownload}>Baixar relatório</button></div><section className="hero-strip"><div><span className="section-kicker">POSTURA GERAL</span><h2>{current.score}/100</h2><p>Score calculado a partir da telemetria mais recente.</p></div><div className="hero-score"><span>Prioridade</span><strong>{current.score < 60 ? "Alta" : current.score < 80 ? "Média" : "Baixa"}</strong><small>risco agregado</small></div></section><div className="metric-grid"><Metric label="DurtWall" value={current.components.waf} delta="eficácia WAF" icon={Shield} accent="teal" /><Metric label="DurtGuardian" value={current.components.cspm} delta="postura CSPM" icon={Gauge} accent="mint" /><Metric label="DurtScope" value={current.components.itdr} delta="higiene ITDR" icon={Activity} accent="yellow" /></div></div>; }
-function SettingsView({ config, setConfig, onSubmit }: { config: Config; setConfig: (config: Config) => void; onSubmit: (event: FormEvent) => void }) { return <div className="content settings-content"><div className="section-heading"><div><span className="section-kicker">AGENTES</span><h3>Configuração operacional</h3><p className="muted">Defina o perímetro e o conector de identidade que o DurtScope deve consultar.</p></div></div><form className="panel settings-panel" onSubmit={onSubmit}><label>Upstream da aplicação<input type="url" value={config.upstream} onChange={(event) => setConfig({ ...config, upstream: event.target.value })} required /></label><div><span className="field-label">Modo de operação</span><div className="segmented">{(["block", "monitor"] as const).map((mode) => <button type="button" key={mode} className={config.mode === mode ? "selected" : ""} onClick={() => setConfig({ ...config, mode })}>{mode === "block" ? "Bloquear ameaças" : "Somente monitorar"}</button>)}</div></div><label>Webhook de alertas <span className="optional">opcional</span><input type="url" value={config.alertWebhookUrl ?? ""} onChange={(event) => setConfig({ ...config, alertWebhookUrl: event.target.value })} placeholder="https://hooks.slack.com/..." /></label><div className="identity-config"><div><span className="field-label">Provider de identidade</span><select value={config.identityProvider} onChange={(event) => setConfig({ ...config, identityProvider: event.target.value as Config["identityProvider"] })}><option value="none">Desativado</option><option value="keycloak">Keycloak</option><option value="okta">Okta</option><option value="aws">AWS IAM</option><option value="google">Google Workspace</option></select></div>{config.identityProvider !== "none" && <><label>Base URL <span className="optional">Keycloak/Okta/Google</span><input type="url" value={config.identityBaseUrl ?? ""} onChange={(event) => setConfig({ ...config, identityBaseUrl: event.target.value })} placeholder="https://identity.example.com" /></label><label>{config.identityProvider === "keycloak" ? "Realm" : config.identityProvider === "google" ? "Customer ID" : config.identityProvider === "aws" ? "Região" : "Org"}<input value={config.identityProvider === "keycloak" ? config.identityRealm ?? "" : config.identityProvider === "google" ? config.identityTenant ?? "" : config.identityProvider === "aws" ? config.identityRegion ?? "" : config.identityTenant ?? ""} onChange={(event) => setConfig({ ...config, ...(config.identityProvider === "keycloak" ? { identityRealm: event.target.value } : config.identityProvider === "google" ? { identityTenant: event.target.value } : config.identityProvider === "aws" ? { identityRegion: event.target.value } : { identityTenant: event.target.value }) })} required /></label><label>{config.identityProvider === "aws" ? "Access key ID" : "Client ID"}<input value={config.identityClientId ?? ""} onChange={(event) => setConfig({ ...config, identityClientId: event.target.value })} autoComplete="off" /></label><label>Secret ou access token<input type="password" value={config.identityProvider === "google" ? config.identityAccessToken ?? "" : config.identityClientSecret ?? ""} onChange={(event) => setConfig({ ...config, ...(config.identityProvider === "google" ? { identityAccessToken: event.target.value } : { identityClientSecret: event.target.value }) })} placeholder="Não será exibido novamente" autoComplete="new-password" /></label></>}</div><div className="form-actions"><span className="muted">Credenciais são mascaradas nas respostas do Control Plane.</span><button className="primary-button" type="submit"><Save size={16} /> Salvar configuração</button></div></form></div>; }
+type EditableConfigResource = {
+  value: Config | null;
+  dirty: boolean;
+  status: "idle" | "loading" | "saving" | "error";
+  error: string;
+  update: (patch: Partial<Config> | ((value: Config) => Config)) => void;
+  discard: () => void;
+  save: () => Promise<void>;
+};
+
+function SettingsView({ resource }: { resource: EditableConfigResource }) {
+  const { value: config, dirty, status, error, update, discard, save } = resource;
+  if (!config) return <div className="content settings-content"><EmptyState label="Carregando configuração..." /></div>;
+  function submit(event: FormEvent) { event.preventDefault(); void save(); }
+  return <div className="content settings-content"><div className="section-heading"><div><span className="section-kicker">AGENTES</span><h3>Configuração operacional</h3><p className="muted">Defina o perímetro e o conector de identidade que o DurtScope deve consultar.</p></div></div><form className="panel settings-panel" onSubmit={submit}><label>Upstream da aplicação<input type="url" value={config.upstream} onChange={(event) => update({ upstream: event.target.value })} required /></label><div><span className="field-label">Modo de operação</span><div className="segmented">{(["block", "monitor"] as const).map((mode) => <button type="button" key={mode} className={config.mode === mode ? "selected" : ""} onClick={() => update({ mode })}>{mode === "block" ? "Bloquear ameaças" : "Somente monitorar"}</button>)}</div></div><label>Webhook de alertas <span className="optional">opcional</span><input type="url" value={config.alertWebhookUrl ?? ""} onChange={(event) => update({ alertWebhookUrl: event.target.value })} placeholder="https://hooks.slack.com/..." /></label><div className="identity-config"><div><span className="field-label">Provider de identidade</span><select value={config.identityProvider} onChange={(event) => update({ identityProvider: event.target.value as Config["identityProvider"] })}><option value="none">Desativado</option><option value="keycloak">Keycloak</option><option value="okta">Okta</option><option value="aws">AWS IAM</option><option value="google">Google Workspace</option></select></div>{config.identityProvider !== "none" && <><label>Base URL <span className="optional">Keycloak/Okta/Google</span><input type="url" value={config.identityBaseUrl ?? ""} onChange={(event) => update({ identityBaseUrl: event.target.value })} placeholder="https://identity.example.com" /></label><label>{config.identityProvider === "keycloak" ? "Realm" : config.identityProvider === "google" ? "Customer ID" : config.identityProvider === "aws" ? "Região" : "Org"}<input value={config.identityProvider === "keycloak" ? config.identityRealm ?? "" : config.identityProvider === "google" ? config.identityTenant ?? "" : config.identityProvider === "aws" ? config.identityRegion ?? "" : config.identityTenant ?? ""} onChange={(event) => update(config.identityProvider === "keycloak" ? { identityRealm: event.target.value } : config.identityProvider === "google" ? { identityTenant: event.target.value } : config.identityProvider === "aws" ? { identityRegion: event.target.value } : { identityTenant: event.target.value })} required /></label><label>{config.identityProvider === "aws" ? "Access key ID" : "Client ID"}<input value={config.identityClientId ?? ""} onChange={(event) => update({ identityClientId: event.target.value })} autoComplete="off" /></label><label>Secret ou access token<input type="password" value={config.identityProvider === "google" ? config.identityAccessToken ?? "" : config.identityClientSecret ?? ""} onChange={(event) => update(config.identityProvider === "google" ? { identityAccessToken: event.target.value } : { identityClientSecret: event.target.value })} placeholder="Não será exibido novamente" autoComplete="new-password" /></label></>}</div>{error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}<div className="form-actions"><span className="muted">{dirty ? "Alterações não salvas." : "Credenciais são mascaradas nas respostas do Control Plane."}</span>{dirty && <button className="text-button" type="button" onClick={discard}>Descartar</button>}<button className="primary-button" type="submit" disabled={status === "saving"}><Save size={16} /> {status === "saving" ? "Salvando..." : "Salvar configuração"}</button></div></form></div>;
+}
 function EmptyState({ label }: { label: string }) { return <div className="empty-state"><FileSearch size={18} /><span>{label}</span></div>; }
