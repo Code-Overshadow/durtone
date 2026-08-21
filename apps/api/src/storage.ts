@@ -134,7 +134,7 @@ export async function persistLogs(tenantId: string, logs: Array<{ method: string
     method: log.method,
     path: log.path,
     status: log.status,
-    remote_ip: log.remoteIp,
+    remote_ip: log.remoteIp ?? null,
     blocked: log.blocked,
     reason: log.reason,
   }));
@@ -457,4 +457,61 @@ export async function listPendingDomains(): Promise<PersistedDomain[] | undefine
     from domains where status in ('pending_dns', 'pending_certificate')
     order by updated_at asc
   `;
+}
+
+export type EdgeRoute = {
+  hostname: string;
+  tenantId: string;
+  upstream: string;
+  mode: string;
+  alertWebhookUrl: string | null;
+  settings: Record<string, unknown>;
+};
+
+/** Active domain -> tenant config mapping the durtwall edge fleet polls to know how to route each Host. */
+export async function listActiveRoutes(): Promise<EdgeRoute[]> {
+  const client = database();
+  if (!client) return [];
+  return client<EdgeRoute[]>`
+    select d.hostname, d.tenant_id as "tenantId", c.upstream, c.mode,
+      c.alert_webhook_url as "alertWebhookUrl", c.settings
+    from domains d
+    join lateral (
+      select upstream, mode, alert_webhook_url, settings
+      from configs
+      where tenant_id = d.tenant_id
+      order by updated_at desc
+      limit 1
+    ) c on true
+    where d.status = 'active'
+  `;
+}
+
+/**
+ * Tenant-scoped upsert used by the fleet log-ingestion path (apps/durtwall serves many tenants at
+ * once, so the global in-memory aggregation in discovery.ts - which predates multi-tenancy and is
+ * left as-is for the single-tenant/no-DB fallback path - can't be used here without leaking counts
+ * across tenants). Shadow/documented classification isn't tenant-scoped anywhere yet (the OpenAPI
+ * comparison in discovery.ts is also global), so this always records `documented: false, shadow: false`
+ * rather than guess - a false "shadow API" alert is worse than a missed one. Tracked as backlog.
+ */
+export async function recordObservedEndpoint(tenantId: string, method: string, path: string, statusCode: number) {
+  const client = database();
+  if (!client || !tenantId) return false;
+  const [existing] = await client<{ id: string; statusCodes: Record<string, number> }[]>`
+    select id, status_codes as "statusCodes" from endpoints where tenant_id = ${tenantId} and method = ${method} and path = ${path} limit 1
+  `;
+  if (existing) {
+    const statusCodes = { ...existing.statusCodes, [String(statusCode)]: (existing.statusCodes[String(statusCode)] ?? 0) + 1 };
+    await client.unsafe(
+      `update endpoints set count = count + 1, status_codes = '${jsonLiteral(statusCodes)}'::jsonb, updated_at = now() where id = $1`,
+      [existing.id],
+    );
+  } else {
+    await client.unsafe(
+      `insert into endpoints (tenant_id, method, path, count, status_codes, documented, shadow) values ($1, $2, $3, 1, '${jsonLiteral({ [String(statusCode)]: 1 })}'::jsonb, false, false)`,
+      [tenantId, method, path],
+    );
+  }
+  return true;
 }

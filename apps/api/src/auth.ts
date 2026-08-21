@@ -20,6 +20,11 @@ export async function authenticateRequest(request: Request): Promise<{ ok: true;
   const authorization = request.headers.get('authorization');
   const token = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
 
+  const fleetToken = process.env.EDGE_FLEET_TOKEN;
+  if (token && fleetToken && token === fleetToken) {
+    return { ok: true, context: { userId: 'fleet' } };
+  }
+
   if (token?.startsWith('durtone_agent_')) {
     const agent = await authenticateAgentToken(token);
     if (!agent) return { ok: false, status: 401, error: 'Invalid or revoked agent token' };
@@ -50,4 +55,12 @@ export async function requireTenant(request: Request): Promise<{ ok: true; tenan
   const tenantId = result.context?.tenantId ?? (localAuthAllowed() ? process.env.DURTONE_TENANT_ID ?? localTenantId : undefined);
   if (!tenantId) return { ok: false, status: 403, error: 'A tenant is required for this operation' };
   return { ok: true, tenantId, userId: result.context?.userId ?? 'local-dev' };
+}
+
+/** For endpoints only the edge proxy fleet may call (e.g. the routing table) - never tenant-scoped. */
+export async function requireFleet(request: Request): Promise<{ ok: true } | { ok: false; status: 401 | 503; error: string }> {
+  const result = await authenticateRequest(request);
+  if (!result.ok) return result;
+  if (result.context?.userId !== 'fleet') return { ok: false, status: 401, error: 'A valid fleet token is required' };
+  return { ok: true };
 }

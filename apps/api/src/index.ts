@@ -6,13 +6,13 @@ import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
 import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
-import { createAgentEnrollment, deleteDomain, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, insertDomain, listAgentEnrollments, listDomains, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, revokeAgentEnrollment, updateDomainStatus, updateIdentityStatus, type PersistedScan } from './storage';
+import { createAgentEnrollment, deleteDomain, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, insertDomain, listActiveRoutes, listAgentEnrollments, listDomains, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, revokeAgentEnrollment, updateDomainStatus, updateIdentityStatus, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
 import { calculateSecurityScore } from './securityScore';
 import { getIdentityHygiene, listSecurityIdentities, replaceSecurityIdentities } from './securityState';
-import { authenticateRequest, requireTenant } from './auth';
+import { authenticateRequest, requireFleet, requireTenant } from './auth';
 import { allowRequest } from './rateLimit';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -90,6 +90,26 @@ const app = new Elysia()
   .get('/', () => ({ name: 'DurtOne Control Plane', status: 'running' }))
   .post('/api/v1/ingest/logs', async ({ body, request, set }) => {
     try {
+      const fleet = await requireFleet(request);
+      if (fleet.ok) {
+        // The edge fleet serves many tenants in one process - each entry carries its own tenantId
+        // instead of it being derived from a single-tenant bearer token.
+        const entries = Array.isArray(body) ? body : (body as { logs?: unknown[] }).logs ?? [];
+        const fleetEntries = entries as Array<{ tenantId?: string; method: string; path: string; status: number; blocked?: boolean; reason?: string; remoteIp?: string; remote_ip?: string }>;
+        let accepted = 0;
+        for (const entry of fleetEntries) {
+          if (typeof entry.tenantId !== 'string' || !entry.tenantId) continue;
+          const remoteIp = entry.remoteIp ?? entry.remote_ip;
+          const blocked = entry.blocked ?? entry.status === 403;
+          const reason = entry.reason ?? (entry.status === 403 ? 'waf' : '');
+          await persistLogs(entry.tenantId, [{ method: entry.method, path: entry.path, status: entry.status, blocked, reason, remoteIp }]);
+          await recordObservedEndpoint(entry.tenantId, entry.method.toUpperCase(), entry.path, entry.status);
+          if (blocked && remoteIp) void publishEvent({ type: 'waf.attack', tenantId: entry.tenantId, payload: { remoteIp, blocked: true, path: entry.path, reason } });
+          accepted += 1;
+        }
+        return { accepted };
+      }
+
       const tenant = await requireTenant(request);
       if (!tenant.ok) {
         set.status = tenant.status;
@@ -116,6 +136,14 @@ const app = new Elysia()
       set.status = 400;
       return { error: 'invalid log payload' };
     }
+  })
+  .get('/api/v1/edge/routing-table', async ({ request, set }) => {
+    const fleet = await requireFleet(request);
+    if (!fleet.ok) {
+      set.status = fleet.status;
+      return { error: fleet.error };
+    }
+    return { routes: await listActiveRoutes() };
   })
   .post('/api/v1/openapi', ({ body, set }) => {
     try {
