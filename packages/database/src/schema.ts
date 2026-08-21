@@ -183,6 +183,16 @@ export const auditLogs = pgTable('audit_logs', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const domains = pgTable('domains', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  hostname: varchar('hostname', { length: 255 }).notNull().unique(),
+  status: varchar('status', { length: 24 }).default('pending_dns').notNull(),
+  certificateStatus: text('certificate_status'),
+  errorMessage: text('error_message'),
+  ...timestamps,
+});
+
 export const tenantRelations = relations(tenants, ({ many }) => ({
   users: many(users),
   apiKeys: many(apiKeys),
@@ -197,6 +207,11 @@ export const tenantRelations = relations(tenants, ({ many }) => ({
   identities: many(identities),
   tenantInvitations: many(tenantInvitations),
   auditLogs: many(auditLogs),
+  domains: many(domains),
+}));
+
+export const domainRelations = relations(domains, ({ one }) => ({
+  tenant: one(tenants, { fields: [domains.tenantId], references: [tenants.id] }),
 }));
 
 export const userRelations = relations(users, ({ one }) => ({

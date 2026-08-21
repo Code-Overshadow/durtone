@@ -5,7 +5,8 @@ import { getDiscoveryStats, ingestLogs, listEndpoints, listRequestLogs, replaceO
 import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
-import { createAgentEnrollment, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, listAgentEnrollments, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, revokeAgentEnrollment, updateIdentityStatus, type PersistedScan } from './storage';
+import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
+import { createAgentEnrollment, deleteDomain, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, insertDomain, listAgentEnrollments, listDomains, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, revokeAgentEnrollment, updateDomainStatus, updateIdentityStatus, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -16,6 +17,7 @@ import { allowRequest } from './rateLimit';
 
 const port = Number(process.env.PORT ?? 3000);
 const correlations: Array<Record<string, unknown>> = [];
+const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/;
 
 onEvent('waf.attack', (event) => {
   if (!event.tenantId) return;
@@ -25,6 +27,32 @@ onEvent('cspm.drift', (event) => {
   if (!event.tenantId) return;
   correlations.push({ eventId: event.id, source: 'durtguardian', result: correlateGuardianChange(event.payload as CspmChange, listSecurityIdentities(event.tenantId)) });
 });
+
+async function applyCertificateStatus(domainId: string, cert: FlyCertificateStatus) {
+  const status = cert.ready ? 'active' : cert.awaitingDns ? 'pending_dns' : 'pending_certificate';
+  await updateDomainStatus(domainId, status, JSON.stringify(cert.raw));
+}
+
+let pollingDomains = false;
+async function pollPendingDomains() {
+  if (pollingDomains) return;
+  pollingDomains = true;
+  try {
+    const pending = await listPendingDomains();
+    for (const domain of pending ?? []) {
+      try {
+        const cert = await checkCertificate(domain.hostname);
+        await applyCertificateStatus(domain.id, cert);
+      } catch (error) {
+        if (error instanceof FlyRateLimitError) break;
+        await updateDomainStatus(domain.id, domain.status, undefined, error instanceof Error ? error.message : 'certificate check failed');
+      }
+    }
+  } finally {
+    pollingDomains = false;
+  }
+}
+setInterval(() => void pollPendingDomains(), 60_000);
 
 const app = new Elysia()
   .onRequest(({ request, set }) => {
@@ -177,6 +205,83 @@ const app = new Elysia()
     }
     const persisted = await getPersistedConfig(tenant.tenantId);
     return persisted ? { ...persisted, tenantId: tenant.tenantId } : { ...getWafConfig(), tenantId: tenant.tenantId };
+  })
+  .post('/api/v1/domains', async ({ body, request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const hostname = typeof (body as { hostname?: unknown })?.hostname === 'string' ? (body as { hostname: string }).hostname.trim().toLowerCase() : '';
+    if (!HOSTNAME_PATTERN.test(hostname)) {
+      set.status = 400;
+      return { error: 'invalid hostname' };
+    }
+    let domain;
+    try {
+      domain = await insertDomain(tenant.tenantId, hostname);
+    } catch {
+      set.status = 409;
+      return { error: 'hostname already registered' };
+    }
+    if (!domain) {
+      set.status = 503;
+      return { error: 'domain storage is unavailable' };
+    }
+    try {
+      const cert = await requestCertificate(hostname);
+      await applyCertificateStatus(domain.id, cert);
+    } catch (error) {
+      await updateDomainStatus(domain.id, 'pending_dns', undefined, error instanceof Error ? error.message : 'certificate request failed');
+    }
+    return (await getDomain(tenant.tenantId, domain.id)) ?? domain;
+  })
+  .get('/api/v1/domains', async ({ request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    return { domains: (await listDomains(tenant.tenantId)) ?? [] };
+  })
+  .delete('/api/v1/domains/:id', async ({ params, request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const domain = await getDomain(tenant.tenantId, params.id);
+    if (!domain) {
+      set.status = 404;
+      return { error: 'domain not found' };
+    }
+    try {
+      await deleteCertificate(domain.hostname);
+    } catch {
+      // best-effort: still remove the domain locally even if Fly cleanup fails
+    }
+    const deleted = await deleteDomain(tenant.tenantId, params.id);
+    return { deleted };
+  })
+  .post('/api/v1/domains/:id/recheck', async ({ params, request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const domain = await getDomain(tenant.tenantId, params.id);
+    if (!domain) {
+      set.status = 404;
+      return { error: 'domain not found' };
+    }
+    try {
+      const cert = await checkCertificate(domain.hostname);
+      await applyCertificateStatus(domain.id, cert);
+    } catch (error) {
+      set.status = 502;
+      return { error: error instanceof Error ? error.message : 'certificate check failed' };
+    }
+    return (await getDomain(tenant.tenantId, domain.id)) ?? domain;
   })
   .post('/api/v1/cspm/scans', async ({ body, request, set }) => {
     const tenant = await requireTenant(request);

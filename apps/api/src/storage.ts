@@ -384,3 +384,77 @@ export async function recordAuditLog(input: AuditLogInput) {
   );
   return { hash, previousHash };
 }
+
+export type PersistedDomain = {
+  id: string;
+  tenantId: string;
+  hostname: string;
+  status: string;
+  certificateStatus: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export async function insertDomain(tenantId: string, hostname: string): Promise<PersistedDomain | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<PersistedDomain[]>`
+    insert into domains (tenant_id, hostname)
+    values (${tenantId}, ${hostname})
+    returning id, tenant_id as "tenantId", hostname, status, certificate_status as "certificateStatus",
+      error_message as "errorMessage", created_at as "createdAt", updated_at as "updatedAt"
+  `;
+  return row;
+}
+
+export async function listDomains(tenantId: string): Promise<PersistedDomain[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<PersistedDomain[]>`
+    select id, tenant_id as "tenantId", hostname, status, certificate_status as "certificateStatus",
+      error_message as "errorMessage", created_at as "createdAt", updated_at as "updatedAt"
+    from domains where tenant_id = ${tenantId} order by created_at asc
+  `;
+}
+
+export async function getDomain(tenantId: string, id: string): Promise<PersistedDomain | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<PersistedDomain[]>`
+    select id, tenant_id as "tenantId", hostname, status, certificate_status as "certificateStatus",
+      error_message as "errorMessage", created_at as "createdAt", updated_at as "updatedAt"
+    from domains where tenant_id = ${tenantId} and id = ${id}
+    limit 1
+  `;
+  return row;
+}
+
+export async function deleteDomain(tenantId: string, id: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`delete from domains where tenant_id = ${tenantId} and id = ${id}`;
+  return result.count > 0;
+}
+
+export async function updateDomainStatus(id: string, status: string, certificateStatus?: string, errorMessage?: string | null) {
+  const client = database();
+  if (!client) return false;
+  await client`
+    update domains set status = ${status}, certificate_status = ${certificateStatus ?? null},
+      error_message = ${errorMessage ?? null}, updated_at = now()
+    where id = ${id}
+  `;
+  return true;
+}
+
+export async function listPendingDomains(): Promise<PersistedDomain[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<PersistedDomain[]>`
+    select id, tenant_id as "tenantId", hostname, status, certificate_status as "certificateStatus",
+      error_message as "errorMessage", created_at as "createdAt", updated_at as "updatedAt"
+    from domains where status in ('pending_dns', 'pending_certificate')
+    order by updated_at asc
+  `;
+}
