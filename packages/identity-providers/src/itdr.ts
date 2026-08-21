@@ -7,6 +7,7 @@ export type IdentityRecord = {
   name: string;
   status: 'active' | 'suspended' | 'inactive';
   permissions: string[];
+  ipAddresses: string[];
   lastSeen: string;
 };
 
@@ -17,6 +18,7 @@ export type KeycloakUserLike = {
   lastSeen?: string;
   roles?: string[];
   clientRoles?: string[];
+  ipAddresses?: string[];
 };
 
 export function normalizeKeycloakUsers(users: KeycloakUserLike[]): IdentityRecord[] {
@@ -30,6 +32,7 @@ export function normalizeKeycloakUsers(users: KeycloakUserLike[]): IdentityRecor
       name: user.username,
       status: user.enabled === false ? 'inactive' : 'active',
       permissions,
+      ipAddresses: user.ipAddresses ?? [],
       lastSeen: user.lastSeen ?? new Date(0).toISOString(),
     };
   });

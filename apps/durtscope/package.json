@@ -9,7 +9,9 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@aws-sdk/client-iam": "^3.1115.0",
+    "@durtone/crypto": "workspace:*",
+    "@durtone/identity-providers": "workspace:*",
+    "postgres": "^3.4.9",
     "zod": "^4.4.3"
   },
   "devDependencies": {

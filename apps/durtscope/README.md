@@ -1,61 +1,39 @@
 # DurtScope
 
-Agente Bun de inventario e risk scoring de identidades para o DurtOne.
+Worker de inventário e risk scoring de identidades (ITDR) do DurtOne. Assim como o DurtGuardian
+(CSPM), roda na sua infra, não na do cliente: consulta `identity_providers` de todos os tenants
+direto no Postgres, decifra a credencial de cada um (`@durtone/crypto`), coleta identidades do
+provider (`@durtone/identity-providers`) e grava em `identities`. O cliente cadastra o provider
+pelo dashboard — não instala nada.
 
-## Providers configuraveis
+## Providers suportados
 
-Defina `DURTSCOPE_PROVIDER` como `keycloak`, `okta`, `aws`, `google` ou `none`.
+Cada linha em `identity_providers` tem um `kind`: `keycloak`, `okta`, `aws` ou `google`. O campo
+`credential_ref` guarda, criptografado, um JSON com os segredos específicos do provider:
 
-### Keycloak
+| kind | campos no `credential_ref` decifrado | campos não-secretos (colunas próprias) |
+|---|---|---|
+| `keycloak` | `{ "clientSecret": "..." }` | `baseUrl`, `realmOrTenant` (realm), `clientId` |
+| `okta` | `{ "apiToken": "..." }` | `baseUrl` |
+| `aws` | `{ "accessKeyId": "...", "secretAccessKey": "...", "sessionToken": "..." }` (sessionToken opcional) | `region` |
+| `google` | `{ "accessToken": "..." }` | `baseUrl` (opcional), `realmOrTenant` (customer id) |
 
-```env
-DURTSCOPE_PROVIDER=keycloak
-DURTSCOPE_BASE_URL=https://keycloak.example.com
-DURTSCOPE_REALM=master
-DURTSCOPE_CLIENT_ID=durtone-scope
-DURTSCOPE_CLIENT_SECRET=secret-from-a-secret-manager
-```
+Para Keycloak, o worker também busca as sessões ativas de cada usuário
+(`/admin/realms/{realm}/users/{id}/sessions`) para preencher `ipAddresses` — necessário para a
+correlação com o DurtWall (IP de ataque → identidade). Os outros providers não expõem IP de
+sessão nas APIs usadas hoje, então ficam com `ipAddresses: []`.
 
-O agente usa Client Credentials e consulta `/admin/realms/{realm}/users`.
+## Revogação
 
-### Okta
+A revogação (desativar usuário, matar sessão, deletar access key) é uma ação disparada pelo
+usuário no dashboard, não algo que este worker faz por conta própria. Ela é executada pela API
+(`POST /api/v1/identities/:id/revoke`), que também usa `@durtone/identity-providers` para chamar
+o provider certo, e sempre grava em `audit_logs`.
 
-```env
-DURTSCOPE_PROVIDER=okta
-DURTSCOPE_BASE_URL=https://company.okta.com
-DURTSCOPE_API_TOKEN=secret-from-a-secret-manager
-```
-
-O agente consulta `/api/v1/users` usando o token `SSWS`.
-
-### AWS IAM
-
-```env
-DURTSCOPE_PROVIDER=aws
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=access-key
-AWS_SECRET_ACCESS_KEY=secret-key
-AWS_SESSION_TOKEN=optional-session-token
-```
-
-O agente usa `@aws-sdk/client-iam` e lista IAM users, access keys e roles. Em producao, prefira role de workload ou credential chain do ambiente em vez de chaves estaticas.
-
-### Google Workspace
-
-```env
-DURTSCOPE_PROVIDER=google
-DURTSCOPE_CUSTOMER=my_customer
-DURTSCOPE_ACCESS_TOKEN=oauth-token-from-secret-manager
-# Opcional: sobrescreve a URL padrao da Admin SDK
-DURTSCOPE_BASE_URL=https://admin.googleapis.com/admin/directory/v1
-```
-
-O token precisa ter escopo suficiente para `admin.directory.user.readonly`.
-
-## Execucao
+## Execução
 
 ```bash
 bun run --cwd apps/durtscope dev
 ```
 
-O dashboard permite selecionar o provider e editar os parametros em Configuracao. Secrets sao mascarados pelo Control Plane e nao sao devolvidos em respostas de leitura.
+Requer `DATABASE_URL` e `CREDENTIAL_ENCRYPTION_KEY` (mesma chave da API) — ver `.env.example`.

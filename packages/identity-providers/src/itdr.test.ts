@@ -9,6 +9,7 @@ test('risk scoring increases with stale tokens and broad permissions', () => {
     name: 'payments-worker',
     status: 'active',
     permissions: ['read:users', 'write:users', 'manage:clients'],
+    ipAddresses: [],
     lastSeen: '2024-01-01T00:00:00.000Z',
   };
 
@@ -18,9 +19,9 @@ test('risk scoring increases with stale tokens and broad permissions', () => {
 
 test('summary groups identities by provider and risk band', () => {
   const identities: IdentityRecord[] = [
-    { id: 'u-1', type: 'human', provider: 'keycloak', name: 'alice', status: 'active', permissions: ['read:users'], lastSeen: '2026-06-01T00:00:00.000Z' },
-    { id: 'svc-1', type: 'service-account', provider: 'aws', name: 'payments-worker', status: 'active', permissions: ['read:all', 'write:all'], lastSeen: '2025-01-01T00:00:00.000Z' },
-    { id: 'bot-1', type: 'bot', provider: 'okta', name: 'deploy-bot', status: 'suspended', permissions: ['deploy'], lastSeen: '2026-07-01T00:00:00.000Z' },
+    { id: 'u-1', type: 'human', provider: 'keycloak', name: 'alice', status: 'active', permissions: ['read:users'], ipAddresses: [], lastSeen: '2026-06-01T00:00:00.000Z' },
+    { id: 'svc-1', type: 'service-account', provider: 'aws', name: 'payments-worker', status: 'active', permissions: ['read:all', 'write:all'], ipAddresses: [], lastSeen: '2025-01-01T00:00:00.000Z' },
+    { id: 'bot-1', type: 'bot', provider: 'okta', name: 'deploy-bot', status: 'suspended', permissions: ['deploy'], ipAddresses: [], lastSeen: '2026-07-01T00:00:00.000Z' },
   ];
 
   const summary = summarizeIdentities(identities);
@@ -55,4 +56,12 @@ test('stale identities and Keycloak normalization are detected correctly', () =>
   expect(identities).toHaveLength(2);
   expect(stale[0]?.id).toBe('u-1');
   expect(buildIdentityRisk(identities[0])).toBeGreaterThan(60);
+});
+
+test('normalizeKeycloakUsers carries through session ip addresses', () => {
+  const identities = normalizeKeycloakUsers([
+    { id: 'u-1', username: 'alice', enabled: true, ipAddresses: ['203.0.113.5', '203.0.113.5', '198.51.100.9'] },
+  ]);
+
+  expect(identities[0]?.ipAddresses).toEqual(['203.0.113.5', '203.0.113.5', '198.51.100.9']);
 });
