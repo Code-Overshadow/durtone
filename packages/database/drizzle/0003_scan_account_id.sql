@@ -1,0 +1,1 @@
+ALTER TABLE "scans" ADD COLUMN IF NOT EXISTS "account_id" varchar(160) NOT NULL DEFAULT 'unknown';

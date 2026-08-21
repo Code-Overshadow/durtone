@@ -1,6 +1,25 @@
-.copilot
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+.vscode/mcp.env
+
+# Tooling and generated output
+node_modules/
+.next/
+dist/
+coverage/
+.vercel/
+
+# Go build output
+agents/durtwall/durtwall
+agents/durtwall/*.exe
+agents/durtwall/durtwall-linux-*
 
 /knowledge_base
+
+# Duplicate of /knowledge_base kept locally for Copilot context, not canonical
+/.copilot
 
 /node_modules
 

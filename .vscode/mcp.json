@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp",
+      "envFile": "${workspaceFolder}/.vscode/mcp.env",
+      "headers": {
+        "Authorization": "Bearer ${env:SUPABASE_ACCESS_TOKEN}"
+      }
+    },
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com",
+      "envFile": "${workspaceFolder}/.vscode/mcp.env",
+      "headers": {
+        "Authorization": "Bearer ${env:VERCEL_TOKEN}"
+      }
+    }
+  }
+}

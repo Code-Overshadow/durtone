@@ -3,6 +3,15 @@
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "check": "bun run --filter '*' check"
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "dev": "concurrently -n api,dashboard -c blue,green \"bun run --filter api dev\" \"bun run --filter dashboard dev\"",
+    "dev:all": "concurrently -n api,dashboard,durtguardian,durtscope -c blue,green,yellow,magenta \"bun run --filter api dev\" \"bun run --filter dashboard dev\" \"bun run --filter durtguardian dev\" \"bun run --filter durtscope dev\"",
+    "check": "bun run --filter '*' check",
+    "vercel:login-check": "vercel whoami",
+    "vercel:deploy": "vercel deploy --cwd apps/dashboard"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
   }
 }

@@ -1,0 +1,15 @@
+upstream: http://localhost:3001
+port: 8080
+mode: block
+rules_file: rules.conf
+log_file: ""
+rate_limit: 60
+rate_burst: 20
+request_body_max: 1048576
+stealth: false
+honeytokens: false
+honeypot: false
+honeypot_image: nginx:alpine
+honeypot_port: 8081
+control_plane_url: ""
+control_plane_token: ""
