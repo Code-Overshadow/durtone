@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { randomBytes } from 'node:crypto';
-import { decryptSecret, encryptSecret } from './crypto';
+import { decryptSecret, encryptSecret } from './index';
 
 describe('credential encryption', () => {
   beforeAll(() => {
