@@ -16,19 +16,16 @@ type CspmDrift = { kind: "changed" | "new" | "missing"; resource: string; before
 type CspmSummary = { provider: string; accountId: string; postureScore: number; totalChecks: number; passChecks: number; failChecks: number; criticalFindings: number; driftCount: number; lastScanAt: string; drifts: CspmDrift[] };
 type SecurityScore = { score: number; components: { waf: number; cspm: number; itdr: number }; weights: { waf: number; cspm: number; itdr: number } };
 type Config = { upstream: string; mode: "block" | "monitor"; alertWebhookUrl?: string; identityProvider: "none" | "keycloak" | "okta" | "aws" | "google"; identityBaseUrl?: string; identityRealm?: string; identityTenant?: string; identityRegion?: string; identityClientId?: string; identityClientSecret?: string; identityAccessToken?: string };
-type AgentEnrollment = { id: string; name: string; revoked: boolean; lastUsedAt: string | null; createdAt: string };
+type Domain = { id: string; hostname: string; status: string };
 
 const emptyStats: Stats = { totalRequests: 0, blockedRequests: 0, discoveredEndpoints: 0, shadowApis: 0 };
-const AGENT_ONLINE_THRESHOLD_MS = 60_000;
 
-function describeAgentStatus(agents: AgentEnrollment[]) {
-  const active = agents.filter((agent) => !agent.revoked && agent.lastUsedAt);
-  if (!active.length) return { online: false, label: "Nenhum agente conectado" };
-  const mostRecent = active.reduce((latest, agent) => (new Date(agent.lastUsedAt!).getTime() > new Date(latest.lastUsedAt!).getTime() ? agent : latest));
-  const ageMs = Date.now() - new Date(mostRecent.lastUsedAt!).getTime();
-  if (ageMs < AGENT_ONLINE_THRESHOLD_MS) return { online: true, label: `${mostRecent.name} conectado` };
-  const minutes = Math.max(1, Math.round(ageMs / 60_000));
-  return { online: false, label: `${mostRecent.name} sem sinal há ${minutes}min` };
+function describeDomainStatus(domains: Domain[]) {
+  if (!domains.length) return { online: false, label: "Nenhum domínio cadastrado" };
+  const active = domains.filter((domain) => domain.status === "active");
+  if (active.length === domains.length) return { online: true, label: `${active.length} domínio${active.length === 1 ? "" : "s"} ativo${active.length === 1 ? "" : "s"}` };
+  if (active.length > 0) return { online: true, label: `${active.length}/${domains.length} domínios ativos` };
+  return { online: false, label: `${domains.length} domínio${domains.length === 1 ? "" : "s"} pendente${domains.length === 1 ? "" : "s"}` };
 }
 
 export function DashboardApp() {
@@ -43,7 +40,7 @@ export function DashboardApp() {
   const endpointsResource = usePollingResource(() => apiGet<{ endpoints: Endpoint[] }>("/api/v1/endpoints"), { enabled });
   const cspmResource = usePollingResource(() => apiGet<CspmSummary>("/api/v1/cspm/summary"), { enabled });
   const securityScoreResource = usePollingResource(() => apiGet<SecurityScore>("/api/v1/security/score"), { enabled });
-  const agentsResource = usePollingResource(() => apiGet<{ agents: AgentEnrollment[] }>("/api/v1/agents"), { enabled });
+  const domainsResource = usePollingResource(() => apiGet<{ domains: Domain[] }>("/api/v1/domains"), { enabled });
   const configResource = useEditableResource<Config>({
     fetcher: () => apiGet<Config>("/api/v1/config"),
     saver: (value) => apiPut<Config>("/api/v1/config", value),
@@ -52,9 +49,9 @@ export function DashboardApp() {
   const stats = statsResource.data ?? emptyStats;
   const logs = logsResource.data?.logs ?? [];
   const endpoints = endpointsResource.data?.endpoints ?? [];
-  const agents = agentsResource.data?.agents ?? [];
-  const loading = statsResource.loading || logsResource.loading || endpointsResource.loading || cspmResource.loading || securityScoreResource.loading || agentsResource.loading;
-  const apiError = statsResource.error || logsResource.error || endpointsResource.error || cspmResource.error || securityScoreResource.error || agentsResource.error;
+  const domains = domainsResource.data?.domains ?? [];
+  const loading = statsResource.loading || logsResource.loading || endpointsResource.loading || cspmResource.loading || securityScoreResource.loading || domainsResource.loading;
+  const apiError = statsResource.error || logsResource.error || endpointsResource.error || cspmResource.error || securityScoreResource.error || domainsResource.error;
 
   function refreshAll() {
     void statsResource.refresh();
@@ -62,13 +59,13 @@ export function DashboardApp() {
     void endpointsResource.refresh();
     void cspmResource.refresh();
     void securityScoreResource.refresh();
-    void agentsResource.refresh();
+    void domainsResource.refresh();
   }
 
   if (checkingSession) return <div className="auth-shell"><div className="loader-line" /></div>;
   if (!session) return <LoginScreen error={authError} onError={setAuthError} />;
 
-  const agentStatus = describeAgentStatus(agents);
+  const domainStatus = describeDomainStatus(domains);
   const navItems: { id: View; label: string; icon: typeof Gauge }[] = [
     { id: "overview", label: "Visão geral", icon: Gauge }, { id: "logs", label: "Eventos", icon: Activity },
     { id: "surface", label: "Superfície API", icon: FileSearch }, { id: "cspm", label: "CSPM", icon: Shield },
@@ -90,7 +87,7 @@ export function DashboardApp() {
       <div className="brand"><span className="brand-mark"><Shield size={17} /></span><span>DurtOne</span><button className="icon-button close-nav" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={17} /></button></div>
       <div className="tenant-switch"><span className="tenant-dot" /><span>Workspace principal</span><ChevronRight size={14} /></div>
       <nav>{navItems.map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? "nav-item active" : "nav-item"} onClick={() => { setView(id); setMobileNav(false); }}><Icon size={17} /><span>{label}</span>{id === "surface" && stats.shadowApis > 0 && <b>{stats.shadowApis}</b>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className={agentStatus.online ? "agent-status" : "agent-status offline"}><span className={agentStatus.online ? "pulse" : "pulse offline"} /><div><strong>DurtWall</strong><small>{agentStatus.label}</small></div>{agentStatus.online ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</div><button className="nav-item" onClick={() => void signOut()}><LogOut size={17} /><span>Sair</span></button></div>
+      <div className="sidebar-bottom"><div className={domainStatus.online ? "agent-status" : "agent-status offline"}><span className={domainStatus.online ? "pulse" : "pulse offline"} /><div><strong>DurtWall</strong><small>{domainStatus.label}</small></div>{domainStatus.online ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</div><button className="nav-item" onClick={() => void signOut()}><LogOut size={17} /><span>Sair</span></button></div>
     </aside>
     {mobileNav && <button className="nav-overlay" onClick={() => setMobileNav(false)} aria-label="Fechar navegação" />}
     <main className="main-area">

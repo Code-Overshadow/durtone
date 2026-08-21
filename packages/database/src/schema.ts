@@ -31,16 +31,6 @@ export const users = pgTable('users', {
   ...timestamps,
 });
 
-export const apiKeys = pgTable('api_keys', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
-  name: varchar('name', { length: 120 }).notNull(),
-  keyHash: text('key_hash').notNull().unique(),
-  revoked: boolean('revoked').default(false).notNull(),
-  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
-  ...timestamps,
-});
-
 export const configs = pgTable('configs', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
@@ -195,7 +185,6 @@ export const domains = pgTable('domains', {
 
 export const tenantRelations = relations(tenants, ({ many }) => ({
   users: many(users),
-  apiKeys: many(apiKeys),
   configs: many(configs),
   logs: many(logs),
   endpoints: many(endpoints),

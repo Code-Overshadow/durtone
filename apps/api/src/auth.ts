@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import { authenticateAgentToken } from './storage';
 
 export type AuthContext = {
   userId: string;
@@ -23,12 +22,6 @@ export async function authenticateRequest(request: Request): Promise<{ ok: true;
   const fleetToken = process.env.EDGE_FLEET_TOKEN;
   if (token && fleetToken && token === fleetToken) {
     return { ok: true, context: { userId: 'fleet' } };
-  }
-
-  if (token?.startsWith('durtone_agent_')) {
-    const agent = await authenticateAgentToken(token);
-    if (!agent) return { ok: false, status: 401, error: 'Invalid or revoked agent token' };
-    return { ok: true, context: { userId: `agent:${agent.id}`, tenantId: agent.tenantId } };
   }
 
   if (!authConfigured()) {

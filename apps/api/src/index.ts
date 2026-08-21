@@ -6,7 +6,7 @@ import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
 import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
-import { createAgentEnrollment, deleteDomain, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, insertDomain, listActiveRoutes, listAgentEnrollments, listDomains, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, revokeAgentEnrollment, updateDomainStatus, updateIdentityStatus, type PersistedScan } from './storage';
+import { deleteDomain, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, insertDomain, listActiveRoutes, listDomains, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateDomainStatus, updateIdentityStatus, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -186,54 +186,6 @@ const app = new Elysia()
     }
     return (await getPersistedCspmSummary(tenant.tenantId)) ?? getCspmSummary();
   })
-  .post('/api/v1/agents/enrollment', async ({ body, request, set }) => {
-    const tenant = await requireTenant(request);
-    if (!tenant.ok) {
-      set.status = tenant.status;
-      return { error: tenant.error };
-    }
-    const name = typeof (body as { name?: unknown })?.name === 'string' ? (body as { name: string }).name.trim() : '';
-    if (!name || name.length > 120) {
-      set.status = 400;
-      return { error: 'agent name is required' };
-    }
-    const enrollment = await createAgentEnrollment(tenant.tenantId, name);
-    if (!enrollment) {
-      set.status = 503;
-      return { error: 'agent enrollment storage is unavailable' };
-    }
-    return enrollment;
-  })
-  .get('/api/v1/agents', async ({ request, set }) => {
-    const tenant = await requireTenant(request);
-    if (!tenant.ok) {
-      set.status = tenant.status;
-      return { error: tenant.error };
-    }
-    return { agents: (await listAgentEnrollments(tenant.tenantId)) ?? [] };
-  })
-  .delete('/api/v1/agents/enrollment/:id', async ({ params, request, set }) => {
-    const tenant = await requireTenant(request);
-    if (!tenant.ok) {
-      set.status = tenant.status;
-      return { error: tenant.error };
-    }
-    const revoked = await revokeAgentEnrollment(tenant.tenantId, params.id);
-    if (!revoked) {
-      set.status = 404;
-      return { error: 'agent enrollment not found' };
-    }
-    return { revoked: true };
-  })
-  .get('/api/v1/agents/config', async ({ request, set }) => {
-    const tenant = await requireTenant(request);
-    if (!tenant.ok) {
-      set.status = tenant.status;
-      return { error: tenant.error };
-    }
-    const persisted = await getPersistedConfig(tenant.tenantId);
-    return persisted ? { ...persisted, tenantId: tenant.tenantId } : { ...getWafConfig(), tenantId: tenant.tenantId };
-  })
   .post('/api/v1/domains', async ({ body, request, set }) => {
     const tenant = await requireTenant(request);
     if (!tenant.ok) {
@@ -368,7 +320,7 @@ const app = new Elysia()
       await updateIdentityStatus(identity.id, 'suspended');
       await recordAuditLog({
         tenantId: tenant.tenantId,
-        actorType: tenant.userId.startsWith('agent:') ? 'agent' : 'user',
+        actorType: 'user',
         actorId: tenant.userId,
         action: 'identity.revoke',
         targetType: 'identity',

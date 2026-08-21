@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 let sql: ReturnType<typeof postgres> | undefined;
 
@@ -48,68 +48,6 @@ export type PersistedScan = {
   baselineHash?: string;
   drifts?: Array<{ kind: 'changed' | 'new' | 'missing'; resource: string; before?: string; after?: string }>;
 };
-
-export type AgentEnrollment = {
-  id: string;
-  name: string;
-  token: string;
-  tenantId: string;
-};
-
-function hashSecret(secret: string) {
-  return createHash('sha256').update(secret).digest('hex');
-}
-
-export async function createAgentEnrollment(tenantId: string, name: string): Promise<AgentEnrollment | undefined> {
-  const client = database();
-  if (!client) return undefined;
-  const token = `durtone_agent_${randomBytes(32).toString('hex')}`;
-  const [key] = await client<{ id: string }[]>`
-    insert into api_keys (tenant_id, name, key_hash) values (${tenantId}, ${name}, ${hashSecret(token)}) returning id
-  `;
-  if (!key) return undefined;
-  return { id: key.id, name, token, tenantId };
-}
-
-export async function authenticateAgentToken(token: string) {
-  const client = database();
-  if (!client) return undefined;
-  const [key] = await client<{ id: string; tenantId: string }[]>`
-    update api_keys set last_used_at = now()
-    where key_hash = ${hashSecret(token)} and revoked = false
-    returning id, tenant_id as "tenantId"
-  `;
-  return key;
-}
-
-export type AgentEnrollmentSummary = {
-  id: string;
-  name: string;
-  revoked: boolean;
-  lastUsedAt: string | null;
-  createdAt: string;
-};
-
-export async function listAgentEnrollments(tenantId: string): Promise<AgentEnrollmentSummary[] | undefined> {
-  const client = database();
-  if (!client) return undefined;
-  return client<AgentEnrollmentSummary[]>`
-    select id, name, revoked, last_used_at as "lastUsedAt", created_at as "createdAt"
-    from api_keys
-    where tenant_id = ${tenantId}
-    order by created_at desc
-  `;
-}
-
-export async function revokeAgentEnrollment(tenantId: string, id: string) {
-  const client = database();
-  if (!client) return false;
-  const result = await client`
-    update api_keys set revoked = true, updated_at = now()
-    where id = ${id} and tenant_id = ${tenantId}
-  `;
-  return result.count > 0;
-}
 
 export async function getPersistedConfig(tenantId: string): Promise<PersistedConfig | undefined> {
   const client = database();
