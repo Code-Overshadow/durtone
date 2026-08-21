@@ -44,10 +44,10 @@ export async function authenticateRequest(request: Request): Promise<{ ok: true;
   return { ok: true, context: { userId: data.user.id, tenantId } };
 }
 
-export async function requireTenant(request: Request): Promise<{ ok: true; tenantId: string } | { ok: false; status: 401 | 403 | 503; error: string }> {
+export async function requireTenant(request: Request): Promise<{ ok: true; tenantId: string; userId: string } | { ok: false; status: 401 | 403 | 503; error: string }> {
   const result = await authenticateRequest(request);
   if (!result.ok) return result;
   const tenantId = result.context?.tenantId ?? (localAuthAllowed() ? process.env.DURTONE_TENANT_ID ?? localTenantId : undefined);
   if (!tenantId) return { ok: false, status: 403, error: 'A tenant is required for this operation' };
-  return { ok: true, tenantId };
+  return { ok: true, tenantId, userId: result.context?.userId ?? 'local-dev' };
 }

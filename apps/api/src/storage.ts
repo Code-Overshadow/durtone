@@ -269,3 +269,118 @@ export async function getPersistedCspmSummary(tenantId: string) {
     drifts,
   };
 }
+
+export type PersistedIdentity = {
+  id: string;
+  providerId: string;
+  providerKind: string;
+  externalId: string;
+  name: string;
+  kind: string;
+  status: string;
+  permissions: string[];
+  ipAddresses: string[];
+  riskScore: number;
+  lastSeenAt: string | null;
+};
+
+export async function listPersistedIdentities(tenantId: string): Promise<PersistedIdentity[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<PersistedIdentity[]>`
+    select i.id, i.provider_id as "providerId", ip.kind as "providerKind", i.external_id as "externalId",
+      i.name, i.kind, i.status, i.permissions, i.ip_addresses as "ipAddresses", i.risk_score as "riskScore",
+      i.last_seen_at as "lastSeenAt"
+    from identities i
+    join identity_providers ip on ip.id = i.provider_id
+    where i.tenant_id = ${tenantId}
+    order by i.risk_score desc, i.name asc
+  `;
+}
+
+export async function getPersistedIdentityHygiene(tenantId: string) {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<{ totalIdentities: number; highRiskIdentities: number; staleIdentities: number }[]>`
+    select count(*)::int as "totalIdentities",
+      count(*) filter (where risk_score >= 70)::int as "highRiskIdentities",
+      count(*) filter (where last_seen_at is not null and last_seen_at < now() - interval '30 days')::int as "staleIdentities"
+    from identities where tenant_id = ${tenantId}
+  `;
+  return {
+    totalIdentities: row?.totalIdentities ?? 0,
+    highRiskIdentities: row?.highRiskIdentities ?? 0,
+    staleIdentities: row?.staleIdentities ?? 0,
+  };
+}
+
+export type IdentityForRevoke = {
+  id: string;
+  externalId: string;
+  name: string;
+  kind: string;
+  baseUrl: string | null;
+  realmOrTenant: string | null;
+  region: string | null;
+  clientId: string | null;
+  credentialRef: string;
+};
+
+export async function getIdentityForRevoke(tenantId: string, identityId: string): Promise<IdentityForRevoke | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<IdentityForRevoke[]>`
+    select i.id, i.external_id as "externalId", i.name,
+      ip.kind, ip.base_url as "baseUrl", ip.realm_or_tenant as "realmOrTenant",
+      ip.region, ip.client_id as "clientId", ip.credential_ref as "credentialRef"
+    from identities i
+    join identity_providers ip on ip.id = i.provider_id
+    where i.tenant_id = ${tenantId} and i.id = ${identityId}
+    limit 1
+  `;
+  return row;
+}
+
+export async function updateIdentityStatus(id: string, status: string) {
+  const client = database();
+  if (!client) return false;
+  await client`update identities set status = ${status}, updated_at = now() where id = ${id}`;
+  return true;
+}
+
+export type AuditLogInput = {
+  tenantId: string;
+  actorType: 'user' | 'agent' | 'system';
+  actorId: string;
+  action: string;
+  targetType?: string;
+  targetId?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export async function recordAuditLog(input: AuditLogInput) {
+  const client = database();
+  if (!client) return undefined;
+  const [last] = await client<{ hash: string }[]>`
+    select hash from audit_logs where tenant_id = ${input.tenantId} order by created_at desc limit 1
+  `;
+  const previousHash = last?.hash ?? null;
+  const metadata = input.metadata ?? {};
+  const hash = createHash('sha256').update(JSON.stringify({
+    tenantId: input.tenantId,
+    actorType: input.actorType,
+    actorId: input.actorId,
+    action: input.action,
+    targetType: input.targetType ?? null,
+    targetId: input.targetId ?? null,
+    metadata,
+    previousHash,
+  })).digest('hex');
+
+  await client.unsafe(
+    `insert into audit_logs (tenant_id, actor_type, actor_id, action, target_type, target_id, metadata, previous_hash, hash)
+     values ($1, $2, $3, $4, $5, $6, '${jsonLiteral(metadata)}'::jsonb, $7, $8)`,
+    [input.tenantId, input.actorType, input.actorId, input.action, input.targetType ?? null, input.targetId ?? null, previousHash, hash],
+  );
+  return { hash, previousHash };
+}

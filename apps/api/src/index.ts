@@ -1,9 +1,11 @@
 import { Elysia } from 'elysia';
+import { decryptSecret } from '@durtone/crypto';
+import { buildIdentityProviderConfig, revokeIdentity } from '@durtone/identity-providers';
 import { getDiscoveryStats, ingestLogs, listEndpoints, listRequestLogs, replaceOpenApi } from './discovery';
 import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
-import { createAgentEnrollment, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, listAgentEnrollments, listPersistedEndpoints, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, revokeAgentEnrollment, type PersistedScan } from './storage';
+import { createAgentEnrollment, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, listAgentEnrollments, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, revokeAgentEnrollment, updateIdentityStatus, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -212,7 +214,39 @@ const app = new Elysia()
       set.status = tenant.status;
       return { error: tenant.error };
     }
-    return { identities: listSecurityIdentities(tenant.tenantId) };
+    const persisted = await listPersistedIdentities(tenant.tenantId);
+    return { identities: persisted ?? listSecurityIdentities(tenant.tenantId) };
+  })
+  .post('/api/v1/identities/:id/revoke', async ({ params, request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const identity = await getIdentityForRevoke(tenant.tenantId, params.id);
+    if (!identity) {
+      set.status = 404;
+      return { error: 'identity not found' };
+    }
+    try {
+      const decrypted = decryptSecret(identity.credentialRef);
+      const config = buildIdentityProviderConfig(identity, decrypted);
+      const result = await revokeIdentity(config, { id: identity.externalId, name: identity.name });
+      await updateIdentityStatus(identity.id, 'suspended');
+      await recordAuditLog({
+        tenantId: tenant.tenantId,
+        actorType: tenant.userId.startsWith('agent:') ? 'agent' : 'user',
+        actorId: tenant.userId,
+        action: 'identity.revoke',
+        targetType: 'identity',
+        targetId: identity.id,
+        metadata: { provider: result.provider, actionTaken: result.action, identityName: identity.name },
+      });
+      return { revoked: true, provider: result.provider, action: result.action };
+    } catch (error) {
+      set.status = 502;
+      return { error: error instanceof Error ? error.message : 'revoke failed' };
+    }
   })
   .post('/api/v1/cspm/drifts', ({ body, set }) => {
     try {
@@ -234,7 +268,7 @@ const app = new Elysia()
     return calculateSecurityScore({
       waf: (await getPersistedDiscoveryStats(tenant.tenantId)) ?? getDiscoveryStats(),
       cspm: (await getPersistedCspmSummary(tenant.tenantId)) ?? getCspmSummary(),
-      itdr: getIdentityHygiene(tenant.tenantId),
+      itdr: (await getPersistedIdentityHygiene(tenant.tenantId)) ?? getIdentityHygiene(tenant.tenantId),
     });
   })
   .get('/api/v1/security/correlations', () => ({ correlations: correlations.slice(-100).reverse() }))
@@ -247,7 +281,7 @@ const app = new Elysia()
     const pdf = await buildExecutiveReport(calculateSecurityScore({
       waf: (await getPersistedDiscoveryStats(tenant.tenantId)) ?? getDiscoveryStats(),
       cspm: (await getPersistedCspmSummary(tenant.tenantId)) ?? getCspmSummary(),
-      itdr: getIdentityHygiene(tenant.tenantId),
+      itdr: (await getPersistedIdentityHygiene(tenant.tenantId)) ?? getIdentityHygiene(tenant.tenantId),
     }));
     set.headers['Content-Type'] = 'application/pdf';
     set.headers['Content-Disposition'] = 'attachment; filename="durtone-security-report.pdf"';
