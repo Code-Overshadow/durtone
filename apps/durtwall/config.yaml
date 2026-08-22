@@ -1,11 +1,11 @@
 port: 8080
 rules_file: rules.conf
-log_file: ""
+log_file: "/logs"
 rate_limit: 60
 rate_burst: 20
 request_body_max: 1048576
-honeypot: false
+honeypot: true
 honeypot_image: nginx:alpine
 honeypot_port: 8081
-control_plane_url: ""
-fleet_token: ""
+control_plane_url: "http://localhost:3000"
+fleet_token: "z7xZwz7quRtn48N4eD/T/wmua3TqAh+8h634uR8iPuU="
