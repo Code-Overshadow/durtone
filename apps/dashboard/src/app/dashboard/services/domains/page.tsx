@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import { AlertTriangle, Check, Copy, Globe, RefreshCw, Trash2 } from "lucide-react";
 import { apiDelete, apiPost } from "@/lib/api/client";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
-import { EmptyState, SectionHeading } from "@/components/dashboard-ui";
+import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
 
 const EDGE_HOSTNAME = process.env.NEXT_PUBLIC_EDGE_HOSTNAME ?? "edge.durtone.io";
 
@@ -69,7 +69,11 @@ export default function DomainsSettingsPage() {
   }
 
   return <div className="content settings-content">
+    <ServiceBackLink />
     <SectionHeading kicker="EDGE PROXY DEPLOYMENT" title="Domínios" description="Aponte um CNAME do seu domínio para o fleet do DurtWall - sem instalar nada." />
+    <HelpCallout title="Como apontar seu domínio">
+      Cadastre o domínio abaixo, depois crie um registro <strong>CNAME</strong> na sua zona de DNS apontando pra <code>{EDGE_HOSTNAME}</code>. Assim que o DNS propagar, o status muda de &ldquo;Aguardando DNS&rdquo; pra &ldquo;Emitindo certificado&rdquo; e depois &ldquo;Ativo&rdquo; — automaticamente, sem nenhuma ação extra sua.
+    </HelpCallout>
     <form className="inline-form" onSubmit={submit}>
       <label>Domínio<input value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder="app.seudominio.com" required /></label>
       <div>

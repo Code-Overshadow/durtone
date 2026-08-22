@@ -36,10 +36,10 @@ export function LoginScreen({ error, onError, defaultEmail, defaultSignUp }: { e
     <div className="auth-intro">
       <div className="brand"><span className="brand-mark"><Shield size={17} /></span><span>DurtOne</span></div>
       <div className="auth-copy"><p className="eyebrow">SECURITY OPERATIONS</p><h1>Clareza quando a superfície muda.</h1><p>Monitore tráfego, bloqueios e APIs que escapam da documentação em um só lugar.</p></div>
-      <div className="auth-foot"><span className="pulse" /> Control Plane operacional</div>
+      <div className="auth-foot"><span className="pulse" /> DurtOne operacional</div>
     </div>
     <form className="auth-form" onSubmit={submit}>
-      <div><p className="eyebrow">CONTROL PLANE</p><h2>{signUp ? "Criar acesso" : "Entrar no workspace"}</h2><p className="muted">Use suas credenciais Supabase para continuar.</p></div>
+      <div><p className="eyebrow">DURTONE</p><h2>{signUp ? "Criar acesso" : "Entrar no workspace"}</h2><p className="muted">Use suas credenciais Supabase para continuar.</p></div>
       <label>E-mail<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" /></label>
       <label>Senha<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete={signUp ? "new-password" : "current-password"} /></label>
       {error && <div className="notice error">{error}</div>}

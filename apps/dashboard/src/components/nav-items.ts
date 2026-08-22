@@ -1,19 +1,16 @@
-import { Activity, FileSearch, Gauge, Shield } from "lucide-react";
+import { Activity, FileSearch, Gauge, LayoutGrid, Shield, UsersRound } from "lucide-react";
 
 export const NAV_ITEMS = [
-  { href: "/", label: "Visão geral", icon: Gauge },
-  { href: "/logs", label: "Eventos", icon: Activity },
-  { href: "/surface", label: "Superfície API", icon: FileSearch },
-  { href: "/cspm", label: "CSPM", icon: Shield },
-  { href: "/security", label: "Security Score", icon: Gauge },
-  { href: "/settings/waf", label: "Configuração", icon: Shield },
+  { href: "/dashboard", label: "Visão geral", icon: Gauge },
+  { href: "/dashboard/logs", label: "Eventos", icon: Activity },
+  { href: "/dashboard/surface", label: "Superfície API", icon: FileSearch },
+  { href: "/dashboard/cspm", label: "CSPM", icon: Shield },
+  { href: "/dashboard/security", label: "Security Score", icon: Gauge },
+  { href: "/dashboard/services", label: "Serviços", icon: LayoutGrid },
+  { href: "/dashboard/account/tenant", label: "Conta", icon: UsersRound },
 ];
 
-export const SETTINGS_NAV_ITEMS = [
-  { href: "/settings/waf", label: "WAF" },
-  { href: "/settings/domains", label: "Domínios" },
-  { href: "/settings/cspm", label: "Contas Cloud" },
-  { href: "/settings/itdr", label: "Provedores de Identidade" },
-  { href: "/settings/tenant", label: "Tenant" },
-  { href: "/settings/users", label: "Usuários" },
+export const ACCOUNT_NAV_ITEMS = [
+  { href: "/dashboard/account/tenant", label: "Tenant" },
+  { href: "/dashboard/account/users", label: "Usuários" },
 ];

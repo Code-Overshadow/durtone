@@ -5,7 +5,7 @@ import { AlertTriangle, Plus, Trash2, Users } from "lucide-react";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
-import { EmptyState, SectionHeading } from "@/components/dashboard-ui";
+import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
 
 type IdentityProvider = { id: string; kind: string; displayName: string; baseUrl: string | null; realmOrTenant: string | null; region: string | null; clientId: string | null; enabled: boolean };
 type Kind = "keycloak" | "okta" | "aws" | "google";
@@ -71,7 +71,11 @@ export default function ItdrSettingsPage() {
   }
 
   return <div className="content settings-content">
+    <ServiceBackLink />
     <SectionHeading kicker="DURTSCOPE" title="Provedores de identidade" description="Conectores que o DurtScope consulta para inventariar identidades humanas e de serviço." />
+    <HelpCallout title="O que o DurtScope faz">
+      Conecta no seu provedor de identidade (Keycloak, Okta, AWS IAM ou Google Workspace) pra listar contas humanas e de serviço, calcular um risco por identidade e permitir revogação real quando algo parecer comprometido ou obsoleto.
+    </HelpCallout>
     <form className="inline-form" onSubmit={submit}>
       <div className="form-grid">
         <label>Provider<select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as Kind })}>

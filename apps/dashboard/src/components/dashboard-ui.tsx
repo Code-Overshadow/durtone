@@ -1,10 +1,22 @@
 "use client";
 
-import { FileSearch, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { ChevronLeft, FileSearch, HelpCircle, RefreshCw } from "lucide-react";
 import { requestRefresh } from "@/lib/refresh-bus";
 
 export function EmptyState({ label }: { label: string }) {
   return <div className="empty-state"><FileSearch size={18} /><span>{label}</span></div>;
+}
+
+export function ServiceBackLink() {
+  return <Link href="/dashboard/services" className="text-button" style={{ marginBottom: 14 }}><ChevronLeft size={14} /> Serviços</Link>;
+}
+
+export function HelpCallout({ title, children }: { title: string; children: React.ReactNode }) {
+  return <div className="help-callout">
+    <HelpCircle size={16} />
+    <div><strong>{title}</strong>{children}</div>
+  </div>;
 }
 
 export function Metric({ label, value, delta, icon: Icon, accent = "teal" }: { label: string; value: number; delta: string; icon: typeof FileSearch; accent?: string }) {

@@ -38,7 +38,7 @@ function AcceptInviteContent() {
     acceptedOnceRef.current = true;
     setAccepting(true);
     apiPost(`/api/v1/invitations/${token}/accept`)
-      .then(() => router.replace("/"))
+      .then(() => router.replace("/dashboard"))
       .catch((reason) => {
         setError(reason instanceof Error ? reason.message : "Não foi possível aceitar o convite");
         setAccepting(false);

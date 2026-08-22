@@ -33,12 +33,12 @@ export default function OverviewPage() {
     </div>
     <div className="section-heading">
       <div><span className="section-kicker">ATIVIDADE RECENTE</span><h3>O que está acontecendo</h3></div>
-      <Link className="text-button" href="/logs">Ver todos <ArrowUpRight size={14} /></Link>
+      <Link className="text-button" href="/dashboard/logs">Ver todos <ArrowUpRight size={14} /></Link>
     </div>
     <div className="lower-grid">
       <div className="panel event-panel">{logs.length ? logs.slice(0, 5).map((log) => <EventRow key={log.id} log={log} />) : <EmptyState label="Nenhum evento recebido ainda" />}</div>
       <div className="panel surface-panel">
-        <div className="panel-heading"><span>Superfície API</span><Link className="icon-button" href="/surface" aria-label="Abrir superfície"><ArrowUpRight size={16} /></Link></div>
+        <div className="panel-heading"><span>Superfície API</span><Link className="icon-button" href="/dashboard/surface" aria-label="Abrir superfície"><ArrowUpRight size={16} /></Link></div>
         {endpoints.length ? endpoints.slice(0, 4).map((endpoint) => <div className="surface-row" key={`${endpoint.method}-${endpoint.path}`}><span className={`method ${endpoint.method.toLowerCase()}`}>{endpoint.method}</span><code>{endpoint.path}</code><span className={endpoint.shadow ? "status-tag shadow" : "status-tag documented"}>{endpoint.shadow ? "shadow" : "documentado"}</span></div>) : <EmptyState label="Aguardando descoberta de endpoints" />}
       </div>
     </div>

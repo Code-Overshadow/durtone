@@ -20,7 +20,7 @@ async function extractErrorMessage(response: Response, path: string): Promise<st
   } catch {
     // response wasn't JSON - fall through to the generic message below
   }
-  return `Control Plane indisponível (${path})`;
+  return `Serviço indisponível (${path})`;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

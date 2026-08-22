@@ -5,7 +5,7 @@ import { AlertTriangle, Cloud, Plus, Trash2 } from "lucide-react";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
-import { EmptyState, SectionHeading } from "@/components/dashboard-ui";
+import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
 
 type CloudAccount = { id: string; provider: string; accountId: string; displayName: string; regions: string[]; enabled: boolean; lastScanAt: string | null };
 type Provider = "aws" | "azure" | "gcp";
@@ -59,7 +59,11 @@ export default function CspmSettingsPage() {
   }
 
   return <div className="content settings-content">
+    <ServiceBackLink />
     <SectionHeading kicker="DURTGUARDIAN" title="Contas cloud" description="Credenciais que o DurtGuardian usa para varrer a postura CSPM de cada conta." />
+    <HelpCallout title="O que o DurtGuardian precisa">
+      Uma credencial de <strong>leitura</strong> (nunca escrita) na conta cloud — para AWS, um usuário/role IAM com acesso somente-leitura basta. O DurtGuardian varre a cada poucos minutos, compara com a última varredura e aponta drift de configuração automaticamente, sem agendar nada do seu lado.
+    </HelpCallout>
     <form className="inline-form" onSubmit={submit}>
       <div className="form-grid">
         <label>Provider<select value={form.provider} onChange={(event) => setForm({ ...form, provider: event.target.value as Provider })}>

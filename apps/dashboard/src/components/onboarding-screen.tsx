@@ -27,7 +27,7 @@ export function OnboardingScreen({ onCreated, onCancel }: { onCreated: () => voi
     <div className="auth-intro">
       <div className="brand"><span className="brand-mark"><Shield size={17} /></span><span>DurtOne</span></div>
       <div className="auth-copy"><p className="eyebrow">SECURITY OPERATIONS</p><h1>Crie seu primeiro workspace.</h1><p>Um workspace é onde você configura o DurtWall, DurtGuardian e DurtScope para a sua empresa. Você pode criar mais de um e convidar seu time depois.</p></div>
-      <div className="auth-foot"><span className="pulse" /> Control Plane operacional</div>
+      <div className="auth-foot"><span className="pulse" /> DurtOne operacional</div>
     </div>
     <form className="auth-form" onSubmit={submit}>
       <div><p className="eyebrow">NOVO WORKSPACE</p><h2>Nome da empresa</h2><p className="muted">Você vai poder convidar outras pessoas depois em Configurações → Usuários.</p></div>

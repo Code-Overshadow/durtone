@@ -17,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DurtOne Control Plane",
-  description: "Security operations dashboard for DurtOne",
+  title: "DurtOne",
+  description: "WAF, descoberta de APIs, CSPM e ITDR em uma única operação de segurança.",
 };
 
 export default function RootLayout({ children }: RootLayoutProps) {

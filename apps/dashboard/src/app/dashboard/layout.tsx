@@ -57,7 +57,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const domains = domainsResource.data?.domains ?? [];
   const domainStatus = describeDomainStatus(domains);
   const loading = statsResource.loading || domainsResource.loading;
-  const activeSettings = pathname.startsWith("/settings");
+  function isNavItemActive(href: string) {
+    if (href === "/dashboard") return pathname === "/dashboard";
+    if (href === "/dashboard/services") return pathname.startsWith("/dashboard/services");
+    if (href === "/dashboard/account/tenant") return pathname.startsWith("/dashboard/account");
+    return pathname === href;
+  }
 
   return <DashboardShellContext.Provider value={{ stats, domains, refreshDomains: () => void domainsResource.refresh(), activeTenantId, memberships }}>
     <div className="dashboard-shell">
@@ -65,8 +70,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="brand"><span className="brand-mark"><Shield size={17} /></span><span>DurtOne</span><button className="icon-button close-nav" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={17} /></button></div>
         <TenantSwitcher memberships={memberships} activeTenantId={activeTenantId} onSwitch={switchTenant} onCreateNew={() => setCreatingTenant(true)} />
         <nav>{NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const active = href === "/settings/waf" ? activeSettings : pathname === href;
-          return <Link key={href} href={href} className={active ? "nav-item active" : "nav-item"} onClick={() => setMobileNav(false)}><Icon size={17} /><span>{label}</span>{href === "/surface" && stats.shadowApis > 0 && <b>{stats.shadowApis}</b>}</Link>;
+          const active = isNavItemActive(href);
+          return <Link key={href} href={href} className={active ? "nav-item active" : "nav-item"} onClick={() => setMobileNav(false)}><Icon size={17} /><span>{label}</span>{href === "/dashboard/surface" && stats.shadowApis > 0 && <b>{stats.shadowApis}</b>}</Link>;
         })}</nav>
         <div className="sidebar-bottom">
           <div className={domainStatus.online ? "agent-status" : "agent-status offline"}><span className={domainStatus.online ? "pulse" : "pulse offline"} /><div><strong>DurtWall</strong><small>{domainStatus.label}</small></div>{domainStatus.online ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}</div>
