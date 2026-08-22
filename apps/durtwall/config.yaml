@@ -8,4 +8,4 @@ honeypot: true
 honeypot_image: nginx:alpine
 honeypot_port: 8081
 control_plane_url: "http://localhost:3000"
-fleet_token: "z7xZwz7quRtn48N4eD/T/wmua3TqAh+8h634uR8iPuU="
+fleet_token:

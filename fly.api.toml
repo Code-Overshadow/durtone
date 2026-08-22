@@ -3,10 +3,7 @@ app = "durtone-api"
 primary_region = "gru"
 
 [build]
-  dockerfile = "Dockerfile.bun"
-
-[build.args]
-  APP_DIR = "apps/api"
+  dockerfile = "Dockerfile.api"
 
 [env]
   PORT = "3000"

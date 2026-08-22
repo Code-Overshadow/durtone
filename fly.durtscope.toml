@@ -6,10 +6,7 @@ app = "durtone-durtscope"
 primary_region = "gru"
 
 [build]
-  dockerfile = "Dockerfile.bun"
-
-[build.args]
-  APP_DIR = "apps/durtscope"
+  dockerfile = "Dockerfile.durtscope"
 
 [env]
   NODE_ENV = "production"

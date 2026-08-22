@@ -1,0 +1,13 @@
+# apps/durtguardian - depende de packages/* via workspace, entao o build precisa da raiz
+# do repo como contexto. Build a partir da raiz:
+#   docker build -f Dockerfile.durtguardian -t durtone-durtguardian .
+FROM oven/bun:1 AS runtime
+WORKDIR /repo
+
+COPY . .
+RUN bun install --frozen-lockfile --production
+
+ENV NODE_ENV=production
+WORKDIR /repo/apps/durtguardian
+
+CMD ["bun", "src/index.ts"]

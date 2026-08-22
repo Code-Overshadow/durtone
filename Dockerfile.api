@@ -1,0 +1,13 @@
+# apps/api - depende de packages/* via workspace, entao o build precisa da raiz do repo
+# como contexto (nao so da pasta do app). Build a partir da raiz:
+#   docker build -f Dockerfile.api -t durtone-api .
+FROM oven/bun:1 AS runtime
+WORKDIR /repo
+
+COPY . .
+RUN bun install --frozen-lockfile --production
+
+ENV NODE_ENV=production
+WORKDIR /repo/apps/api
+
+CMD ["bun", "src/index.ts"]

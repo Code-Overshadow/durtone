@@ -1,0 +1,13 @@
+# apps/durtscope - depende de packages/* via workspace, entao o build precisa da raiz
+# do repo como contexto. Build a partir da raiz:
+#   docker build -f Dockerfile.durtscope -t durtone-durtscope .
+FROM oven/bun:1 AS runtime
+WORKDIR /repo
+
+COPY . .
+RUN bun install --frozen-lockfile --production
+
+ENV NODE_ENV=production
+WORKDIR /repo/apps/durtscope
+
+CMD ["bun", "src/index.ts"]

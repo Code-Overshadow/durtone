@@ -6,10 +6,7 @@ app = "durtone-durtguardian"
 primary_region = "gru"
 
 [build]
-  dockerfile = "Dockerfile.bun"
-
-[build.args]
-  APP_DIR = "apps/durtguardian"
+  dockerfile = "Dockerfile.durtguardian"
 
 [env]
   NODE_ENV = "production"
