@@ -3,27 +3,55 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ChevronRight, LogOut, Menu, RefreshCw, Shield, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LogOut, Menu, RefreshCw, Shield, X } from "lucide-react";
 import { apiGet } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
 import { requestRefresh } from "@/lib/refresh-bus";
+import { getActiveTenantId, setActiveTenantId } from "@/lib/active-tenant";
 import { LoginScreen } from "@/components/login-screen";
+import { OnboardingScreen } from "@/components/onboarding-screen";
+import { TenantSwitcher } from "@/components/tenant-switcher";
 import { NAV_ITEMS } from "@/components/nav-items";
-import { DashboardShellContext, describeDomainStatus, emptyStats, type Domain, type Stats } from "@/components/dashboard-shell-context";
+import { DashboardShellContext, describeDomainStatus, emptyStats, type Domain, type Membership, type Stats } from "@/components/dashboard-shell-context";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { session, checkingSession, signOut } = useSupabaseSession();
   const [authError, setAuthError] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
+  const [creatingTenant, setCreatingTenant] = useState(false);
   const pathname = usePathname();
 
   const enabled = Boolean(session);
+  const membershipsResource = usePollingResource(() => apiGet<{ memberships: Membership[] }>("/api/v1/tenants"), { enabled, intervalMs: 60_000 });
   const statsResource = usePollingResource(() => apiGet<Stats>("/api/v1/stats"), { enabled });
   const domainsResource = usePollingResource(() => apiGet<{ domains: Domain[] }>("/api/v1/domains"), { enabled });
 
   if (checkingSession) return <div className="auth-shell"><div className="loader-line" /></div>;
   if (!session) return <LoginScreen error={authError} onError={setAuthError} />;
+
+  if (!membershipsResource.data) {
+    return <div className="auth-shell"><div className="loader-line" />
+      {membershipsResource.error && <div className="notice error"><AlertTriangle size={16} />{membershipsResource.error} <button className="text-button" onClick={() => void membershipsResource.refresh()}>Tentar novamente</button></div>}
+    </div>;
+  }
+  const memberships = membershipsResource.data.memberships;
+  if (memberships.length === 0) {
+    return <OnboardingScreen onCreated={() => void membershipsResource.refresh()} />;
+  }
+  if (creatingTenant) {
+    return <OnboardingScreen onCreated={() => { setCreatingTenant(false); void membershipsResource.refresh(); }} onCancel={() => setCreatingTenant(false)} />;
+  }
+
+  const userId = session.user.id;
+  const storedTenantId = getActiveTenantId(userId);
+  const activeTenantId = memberships.some((membership) => membership.tenantId === storedTenantId) ? storedTenantId! : memberships[0]!.tenantId;
+  if (activeTenantId !== storedTenantId) setActiveTenantId(userId, activeTenantId);
+
+  function switchTenant(tenantId: string) {
+    setActiveTenantId(userId, tenantId);
+    requestRefresh();
+  }
 
   const stats = statsResource.data ?? emptyStats;
   const domains = domainsResource.data?.domains ?? [];
@@ -31,11 +59,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const loading = statsResource.loading || domainsResource.loading;
   const activeSettings = pathname.startsWith("/settings");
 
-  return <DashboardShellContext.Provider value={{ stats, domains, refreshDomains: () => void domainsResource.refresh() }}>
+  return <DashboardShellContext.Provider value={{ stats, domains, refreshDomains: () => void domainsResource.refresh(), activeTenantId, memberships }}>
     <div className="dashboard-shell">
       <aside className={mobileNav ? "sidebar sidebar-open" : "sidebar"}>
         <div className="brand"><span className="brand-mark"><Shield size={17} /></span><span>DurtOne</span><button className="icon-button close-nav" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={17} /></button></div>
-        <div className="tenant-switch"><span className="tenant-dot" /><span>Workspace principal</span><ChevronRight size={14} /></div>
+        <TenantSwitcher memberships={memberships} activeTenantId={activeTenantId} onSwitch={switchTenant} onCreateNew={() => setCreatingTenant(true)} />
         <nav>{NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = href === "/settings/waf" ? activeSettings : pathname === href;
           return <Link key={href} href={href} className={active ? "nav-item active" : "nav-item"} onClick={() => setMobileNav(false)}><Icon size={17} /><span>{label}</span>{href === "/surface" && stats.shadowApis > 0 && <b>{stats.shadowApis}</b>}</Link>;

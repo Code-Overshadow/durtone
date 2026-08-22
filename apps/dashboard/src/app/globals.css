@@ -11,8 +11,17 @@ button { cursor: pointer; }
 .sidebar { width: 250px; background: #102d32; color: #d5e7e4; padding: 25px 16px 18px; display: flex; flex-direction: column; position: fixed; inset: 0 auto 0 0; z-index: 20; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 700; letter-spacing: -.02em; }
 .brand-mark { width: 29px; height: 29px; display: grid; place-items: center; background: #7fe0c0; color: #102d32; }
-.tenant-switch { margin: 46px 0 20px; padding: 11px 10px; border: 1px solid #2d5255; color: #aac5c2; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+.tenant-switch { margin: 46px 0 20px; padding: 11px 10px; border: 1px solid #2d5255; color: #aac5c2; font-size: 11px; display: flex; align-items: center; gap: 8px; position: relative; background: transparent; width: 100%; text-align: left; }
 .tenant-switch svg { margin-left: auto; }
+.tenant-switch-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tenant-switch-menu { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: #123a3f; border: 1px solid #2d5255; z-index: 30; padding: 6px; display: grid; gap: 2px; max-height: 260px; overflow-y: auto; }
+.tenant-switch-item { display: flex; align-items: center; gap: 8px; padding: 9px 8px; border: 0; background: transparent; color: #c9dedb; font-size: 11px; text-align: left; width: 100%; }
+.tenant-switch-item:hover { background: #1c484a; }
+.tenant-switch-item.active { color: #7fe0c0; }
+.tenant-switch-item span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tenant-switch-item small { color: #8cadab; font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+.tenant-switch-divider { border-top: 1px solid #2d5255; margin: 4px 2px; }
+.tenant-switch-create { color: #7fe0c0 !important; }
 .tenant-dot { width: 7px; height: 7px; border-radius: 50%; background: #7fe0c0; }
 nav { display: grid; gap: 4px; }
 .nav-item { border: 0; background: transparent; color: #9ab6b5; padding: 11px 12px; display: flex; align-items: center; gap: 11px; text-align: left; font-size: 13px; width: 100%; }

@@ -7,7 +7,7 @@ import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
 import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
-import { deleteCloudAccount, deleteDomain, deleteIdentityProvider, deleteInvitation, deleteTenantUser, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, getTenant, insertCloudAccount, insertDomain, insertIdentityProvider, insertInvitation, listActiveRoutes, listCloudAccounts, listCorrelations, listDomains, listIdentityProviders, listInvitations, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, listTenantUsers, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateCloudAccount, updateDomainStatus, updateIdentityProvider, updateIdentityStatus, updateTenantName, updateTenantUserRole, type PersistedScan } from './storage';
+import { deleteCloudAccount, deleteDomain, deleteIdentityProvider, deleteInvitation, deleteTenantMembership, ensureUserProfile, findInvitationByToken, generateUniqueTenantSlug, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, getTenant, insertCloudAccount, insertDomain, insertIdentityProvider, insertInvitation, insertMembership, insertTenant, listActiveRoutes, listCloudAccounts, listCorrelations, listDomains, listIdentityProviders, listInvitations, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, listTenantMembers, listUserMemberships, markInvitationAccepted, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateCloudAccount, updateDomainStatus, updateIdentityProvider, updateIdentityStatus, updateTenantMembershipRole, updateTenantName, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -89,6 +89,8 @@ const app = new Elysia()
   })
   .onBeforeHandle(async ({ request, path }) => {
     if (!path.startsWith('/api/v1/')) return;
+    // Public: lets someone check an invitation (tenant name/role/expiry) before they even have an account.
+    if (request.method === 'GET' && /^\/api\/v1\/invitations\/[^/]+$/.test(path)) return;
     const result = await authenticateRequest(request);
     if (result.ok) return;
     return new Response(JSON.stringify({ error: result.error }), {
@@ -425,6 +427,99 @@ const app = new Elysia()
       return { error: 'invalid WAF configuration' };
     }
   })
+  .get('/api/v1/tenants', async ({ request, set }) => {
+    const result = await authenticateRequest(request);
+    if (!result.ok) {
+      set.status = result.status;
+      return { error: result.error };
+    }
+    const userId = result.context?.userId;
+    if (!userId || userId === 'fleet') {
+      const fallbackId = process.env.DURTONE_TENANT_ID ?? '00000000-0000-0000-0000-000000000001';
+      const fallbackTenant = await getTenant(fallbackId);
+      return { memberships: fallbackTenant ? [{ tenantId: fallbackTenant.id, name: fallbackTenant.name, slug: fallbackTenant.slug, role: 'owner' }] : [] };
+    }
+    return { memberships: (await listUserMemberships(userId)) ?? [] };
+  })
+  .post('/api/v1/tenants', async ({ body, request, set }) => {
+    const result = await authenticateRequest(request);
+    if (!result.ok) {
+      set.status = result.status;
+      return { error: result.error };
+    }
+    const userId = result.context?.userId;
+    const email = result.context?.email;
+    if (!userId || userId === 'fleet' || !email) {
+      set.status = 503;
+      return { error: 'tenant creation requires Supabase authentication' };
+    }
+    const name = typeof (body as { name?: unknown })?.name === 'string' ? (body as { name: string }).name.trim() : '';
+    if (!name || name.length > 160) {
+      set.status = 400;
+      return { error: 'tenant name is required' };
+    }
+    const slug = await generateUniqueTenantSlug(name);
+    const tenant = await insertTenant(name, slug);
+    if (!tenant) {
+      set.status = 503;
+      return { error: 'tenant storage is unavailable' };
+    }
+    await ensureUserProfile(userId, email);
+    await insertMembership(userId, tenant.id, 'owner');
+    await recordAuditLog({ tenantId: tenant.id, actorType: 'user', actorId: userId, action: 'tenant.created' });
+    return tenant;
+  })
+  .get('/api/v1/invitations/:token', async ({ params, set }) => {
+    const tokenHash = createHash('sha256').update(params.token).digest('hex');
+    const invitation = await findInvitationByToken(tokenHash);
+    if (!invitation) {
+      set.status = 404;
+      return { error: 'invitation not found' };
+    }
+    return {
+      tenantName: invitation.tenantName,
+      email: invitation.email,
+      role: invitation.role,
+      expired: new Date(invitation.expiresAt).getTime() < Date.now(),
+      accepted: Boolean(invitation.acceptedAt),
+    };
+  })
+  .post('/api/v1/invitations/:token/accept', async ({ params, request, set }) => {
+    const result = await authenticateRequest(request);
+    if (!result.ok) {
+      set.status = result.status;
+      return { error: result.error };
+    }
+    const userId = result.context?.userId;
+    const email = result.context?.email;
+    if (!userId || userId === 'fleet' || !email) {
+      set.status = 503;
+      return { error: 'accepting an invitation requires Supabase authentication' };
+    }
+    const tokenHash = createHash('sha256').update(params.token).digest('hex');
+    const invitation = await findInvitationByToken(tokenHash);
+    if (!invitation) {
+      set.status = 404;
+      return { error: 'invitation not found' };
+    }
+    if (invitation.acceptedAt) {
+      set.status = 410;
+      return { error: 'invitation already accepted' };
+    }
+    if (new Date(invitation.expiresAt).getTime() < Date.now()) {
+      set.status = 410;
+      return { error: 'invitation expired' };
+    }
+    if (email.toLowerCase() !== invitation.email.toLowerCase()) {
+      set.status = 403;
+      return { error: 'this invitation was sent to a different e-mail address' };
+    }
+    await ensureUserProfile(userId, email);
+    await insertMembership(userId, invitation.tenantId, invitation.role);
+    await markInvitationAccepted(invitation.id);
+    await recordAuditLog({ tenantId: invitation.tenantId, actorType: 'user', actorId: userId, action: 'invitation.accepted', targetType: 'invitation', targetId: invitation.id });
+    return { tenantId: invitation.tenantId, role: invitation.role };
+  })
   .get('/api/v1/tenant', async ({ request, set }) => {
     const tenant = await requireTenant(request);
     if (!tenant.ok) {
@@ -462,7 +557,7 @@ const app = new Elysia()
       set.status = tenant.status;
       return { error: tenant.error };
     }
-    return { users: (await listTenantUsers(tenant.tenantId)) ?? [] };
+    return { users: (await listTenantMembers(tenant.tenantId)) ?? [] };
   })
   .put('/api/v1/tenant/users/:id', async ({ params, body, request, set }) => {
     const tenant = await requireTenant(request);
@@ -475,10 +570,14 @@ const app = new Elysia()
       set.status = 400;
       return { error: 'invalid role' };
     }
-    const updated = await updateTenantUserRole(tenant.tenantId, params.id, role);
-    if (!updated) {
+    const result = await updateTenantMembershipRole(tenant.tenantId, params.id, role);
+    if (result === 'not_found') {
       set.status = 404;
-      return { error: 'user not found' };
+      return { error: 'member not found' };
+    }
+    if (result === 'last_owner') {
+      set.status = 400;
+      return { error: 'a tenant must keep at least one owner' };
     }
     return { updated: true };
   })
@@ -488,10 +587,14 @@ const app = new Elysia()
       set.status = tenant.status;
       return { error: tenant.error };
     }
-    const deleted = await deleteTenantUser(tenant.tenantId, params.id);
-    if (!deleted) {
+    const result = await deleteTenantMembership(tenant.tenantId, params.id);
+    if (result === 'not_found') {
       set.status = 404;
-      return { error: 'user not found' };
+      return { error: 'member not found' };
+    }
+    if (result === 'last_owner') {
+      set.status = 400;
+      return { error: 'a tenant must keep at least one owner' };
     }
     return { deleted: true };
   })

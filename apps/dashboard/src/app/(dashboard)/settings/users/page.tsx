@@ -35,7 +35,8 @@ export default function UsersSettingsPage() {
   const [role, setRole] = useState<Role>("member");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [lastInvite, setLastInvite] = useState<{ email: string; token: string } | null>(null);
+  const [memberError, setMemberError] = useState("");
+  const [lastInvite, setLastInvite] = useState<{ email: string; link: string } | null>(null);
 
   async function invite(event: FormEvent) {
     event.preventDefault();
@@ -43,7 +44,7 @@ export default function UsersSettingsPage() {
     setError("");
     try {
       const created = await apiPost<{ token: string; email: string }>("/api/v1/tenant/invitations", { email: email.trim().toLowerCase(), role });
-      setLastInvite({ email: created.email, token: created.token });
+      setLastInvite({ email: created.email, link: `${window.location.origin}/accept-invite?token=${created.token}` });
       setEmail("");
       void invitationsResource.refresh();
     } catch (reason) {
@@ -54,13 +55,23 @@ export default function UsersSettingsPage() {
   }
 
   async function changeRole(member: Member, nextRole: Role) {
-    await apiPut(`/api/v1/tenant/users/${member.id}`, { role: nextRole });
-    void membersResource.refresh();
+    setMemberError("");
+    try {
+      await apiPut(`/api/v1/tenant/users/${member.id}`, { role: nextRole });
+      void membersResource.refresh();
+    } catch (reason) {
+      setMemberError(reason instanceof Error ? reason.message : "Não foi possível trocar o papel");
+    }
   }
 
   async function removeMember(id: string) {
-    await apiDelete(`/api/v1/tenant/users/${id}`);
-    void membersResource.refresh();
+    setMemberError("");
+    try {
+      await apiDelete(`/api/v1/tenant/users/${id}`);
+      void membersResource.refresh();
+    } catch (reason) {
+      setMemberError(reason instanceof Error ? reason.message : "Não foi possível remover o membro");
+    }
   }
 
   async function revokeInvitation(id: string) {
@@ -79,20 +90,21 @@ export default function UsersSettingsPage() {
       </div>
       {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
       {lastInvite && <div className="notice">
-        <Mail size={16} /> Convite para {lastInvite.email} criado. Como ainda não há SMTP configurado, compartilhe este token manualmente: <CopyChip text={lastInvite.token} />
+        <Mail size={16} /> Convite para {lastInvite.email} criado. Como ainda não há SMTP configurado, compartilhe este link manualmente: <CopyChip text={lastInvite.link} />
         <button type="button" className="icon-button" onClick={() => setLastInvite(null)} aria-label="Fechar"><X size={14} /></button>
       </div>}
-      <div className="form-actions"><span className="muted">O convidado usa o token para concluir o cadastro.</span><button className="primary-button" type="submit" disabled={busy}><Send size={16} /> {busy ? "Enviando..." : "Convidar"}</button></div>
+      <div className="form-actions"><span className="muted">O convidado abre o link pra criar a conta (ou entrar, se já tiver uma) e aceitar.</span><button className="primary-button" type="submit" disabled={busy}><Send size={16} /> {busy ? "Enviando..." : "Convidar"}</button></div>
     </form>
 
-    <SectionHeading kicker="MEMBROS" title="Time" count={`${members.length} membros`} />
+    <SectionHeading kicker="MEMBROS" title="Time" description="Remover um membro tira o acesso dele a este workspace - a conta continua existindo e ele mantém acesso a outros workspaces onde é membro." count={`${members.length} membros`} />
+    {memberError && <div className="notice error"><AlertTriangle size={16} />{memberError}</div>}
     <div className="resource-list">
       {members.length ? members.map((member) => <div className="resource-card" key={member.id}>
         <div><strong><User size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{member.email}</strong><small>desde {new Date(member.createdAt).toLocaleDateString("pt-BR")}</small></div>
         <select value={member.role} onChange={(event) => void changeRole(member, event.target.value as Role)}>
           <option value="member">Membro</option><option value="admin">Admin</option><option value="owner">Owner</option>
         </select>
-        <div className="resource-actions"><button className="danger-button" onClick={() => void removeMember(member.id)}><Trash2 size={13} /> Remover</button></div>
+        <div className="resource-actions"><button className="danger-button" onClick={() => void removeMember(member.id)}><Trash2 size={13} /> Remover deste workspace</button></div>
       </div>) : <EmptyState label="Nenhum membro além de você" />}
     </div>
 

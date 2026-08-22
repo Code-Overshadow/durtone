@@ -477,14 +477,6 @@ export async function listActiveRoutes(): Promise<EdgeRoute[]> {
   return routes.map((route) => ({ ...route, knownEndpoints: endpointsByTenant.get(route.tenantId) ?? [] }));
 }
 
-/**
- * Tenant-scoped upsert used by the fleet log-ingestion path (apps/durtwall serves many tenants at
- * once, so the global in-memory aggregation in discovery.ts - which predates multi-tenancy and is
- * left as-is for the single-tenant/no-DB fallback path - can't be used here without leaking counts
- * across tenants). Shadow/documented classification isn't tenant-scoped anywhere yet (the OpenAPI
- * comparison in discovery.ts is also global), so this always records `documented: false, shadow: false`
- * rather than guess - a false "shadow API" alert is worse than a missed one. Tracked as backlog.
- */
 export type PersistedTenant = {
   id: string;
   name: string;
@@ -511,33 +503,116 @@ export async function updateTenantName(tenantId: string, name: string): Promise<
   return row;
 }
 
-export type PersistedUser = {
+function slugify(name: string) {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'tenant';
+}
+
+export async function generateUniqueTenantSlug(name: string): Promise<string> {
+  const base = slugify(name);
+  const client = database();
+  if (!client) return base;
+  let candidate = base;
+  for (let suffix = 2; ; suffix += 1) {
+    const [existing] = await client<{ id: string }[]>`select id from tenants where slug = ${candidate} limit 1`;
+    if (!existing) return candidate;
+    candidate = `${base}-${suffix}`;
+  }
+}
+
+export async function insertTenant(name: string, slug: string): Promise<PersistedTenant | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<PersistedTenant[]>`
+    insert into tenants (name, slug) values (${name}, ${slug})
+    returning id, name, slug, created_at as "createdAt"
+  `;
+  return row;
+}
+
+export async function ensureUserProfile(userId: string, email: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  await client`insert into users (id, email) values (${userId}, ${email}) on conflict (id) do nothing`;
+  return true;
+}
+
+export type UserMembership = {
+  tenantId: string;
+  name: string;
+  slug: string;
+  role: string;
+};
+
+export async function listUserMemberships(userId: string): Promise<UserMembership[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<UserMembership[]>`
+    select t.id as "tenantId", t.name, t.slug, ut.role
+    from user_tenants ut
+    join tenants t on t.id = ut.tenant_id
+    where ut.user_id = ${userId}
+    order by ut.created_at asc
+  `;
+}
+
+export async function insertMembership(userId: string, tenantId: string, role: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  await client`
+    insert into user_tenants (user_id, tenant_id, role) values (${userId}, ${tenantId}, ${role})
+    on conflict (user_id, tenant_id) do nothing
+  `;
+  return true;
+}
+
+export type PersistedMember = {
   id: string;
   email: string;
   role: string;
   createdAt: string;
 };
 
-export async function listTenantUsers(tenantId: string): Promise<PersistedUser[] | undefined> {
+export async function listTenantMembers(tenantId: string): Promise<PersistedMember[] | undefined> {
   const client = database();
   if (!client) return undefined;
-  return client<PersistedUser[]>`
-    select id, email, role, created_at as "createdAt" from users where tenant_id = ${tenantId} order by created_at asc
+  return client<PersistedMember[]>`
+    select u.id, u.email, ut.role, ut.created_at as "createdAt"
+    from user_tenants ut
+    join users u on u.id = ut.user_id
+    where ut.tenant_id = ${tenantId}
+    order by ut.created_at asc
   `;
 }
 
-export async function updateTenantUserRole(tenantId: string, userId: string, role: string): Promise<boolean> {
+export async function countTenantOwners(tenantId: string): Promise<number> {
   const client = database();
-  if (!client) return false;
-  const result = await client`update users set role = ${role}, updated_at = now() where tenant_id = ${tenantId} and id = ${userId}`;
-  return result.count > 0;
+  if (!client) return 0;
+  const [row] = await client<{ count: number }[]>`
+    select count(*)::int as count from user_tenants where tenant_id = ${tenantId} and role = 'owner'
+  `;
+  return row?.count ?? 0;
 }
 
-export async function deleteTenantUser(tenantId: string, userId: string): Promise<boolean> {
+export type MembershipMutationResult = 'updated' | 'deleted' | 'not_found' | 'last_owner';
+
+export async function updateTenantMembershipRole(tenantId: string, userId: string, role: string): Promise<MembershipMutationResult> {
   const client = database();
-  if (!client) return false;
-  const result = await client`delete from users where tenant_id = ${tenantId} and id = ${userId}`;
-  return result.count > 0;
+  if (!client) return 'not_found';
+  const [existing] = await client<{ role: string }[]>`select role from user_tenants where tenant_id = ${tenantId} and user_id = ${userId} limit 1`;
+  if (!existing) return 'not_found';
+  if (existing.role === 'owner' && role !== 'owner' && (await countTenantOwners(tenantId)) <= 1) return 'last_owner';
+  await client`update user_tenants set role = ${role}, updated_at = now() where tenant_id = ${tenantId} and user_id = ${userId}`;
+  return 'updated';
+}
+
+export async function deleteTenantMembership(tenantId: string, userId: string): Promise<MembershipMutationResult> {
+  const client = database();
+  if (!client) return 'not_found';
+  const [existing] = await client<{ role: string }[]>`select role from user_tenants where tenant_id = ${tenantId} and user_id = ${userId} limit 1`;
+  if (!existing) return 'not_found';
+  if (existing.role === 'owner' && (await countTenantOwners(tenantId)) <= 1) return 'last_owner';
+  await client`delete from user_tenants where tenant_id = ${tenantId} and user_id = ${userId}`;
+  return 'deleted';
 }
 
 export type PersistedInvitation = {
@@ -574,6 +649,38 @@ export async function deleteInvitation(tenantId: string, id: string): Promise<bo
   if (!client) return false;
   const result = await client`delete from tenant_invitations where tenant_id = ${tenantId} and id = ${id}`;
   return result.count > 0;
+}
+
+export type InvitationByToken = {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  email: string;
+  role: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+};
+
+/** Unscoped by tenant - whoever is accepting an invitation doesn't know the tenant id up front, only the token. */
+export async function findInvitationByToken(tokenHash: string): Promise<InvitationByToken | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<InvitationByToken[]>`
+    select i.id, i.tenant_id as "tenantId", t.name as "tenantName", i.email, i.role,
+      i.expires_at as "expiresAt", i.accepted_at as "acceptedAt"
+    from tenant_invitations i
+    join tenants t on t.id = i.tenant_id
+    where i.token_hash = ${tokenHash}
+    limit 1
+  `;
+  return row;
+}
+
+export async function markInvitationAccepted(id: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  await client`update tenant_invitations set accepted_at = now(), updated_at = now() where id = ${id}`;
+  return true;
 }
 
 export type PersistedCloudAccount = {
@@ -702,6 +809,14 @@ export async function deleteIdentityProvider(tenantId: string, id: string): Prom
   return result.count > 0;
 }
 
+/**
+ * Tenant-scoped upsert used by the fleet log-ingestion path (apps/durtwall serves many tenants at
+ * once, so the global in-memory aggregation in discovery.ts - which predates multi-tenancy and is
+ * left as-is for the single-tenant/no-DB fallback path - can't be used here without leaking counts
+ * across tenants). Shadow/documented classification isn't tenant-scoped anywhere yet (the OpenAPI
+ * comparison in discovery.ts is also global), so this always records `documented: false, shadow: false`
+ * rather than guess - a false "shadow API" alert is worse than a missed one. Tracked as backlog.
+ */
 export async function recordObservedEndpoint(tenantId: string, method: string, path: string, statusCode: number) {
   const client = database();
   if (!client || !tenantId) return false;

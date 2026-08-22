@@ -10,11 +10,11 @@ function formatAuthError(reason: unknown) {
   return message;
 }
 
-export function LoginScreen({ error, onError }: { error: string; onError: (value: string) => void }) {
-  const [email, setEmail] = useState("");
+export function LoginScreen({ error, onError, defaultEmail, defaultSignUp }: { error: string; onError: (value: string) => void; defaultEmail?: string; defaultSignUp?: boolean }) {
+  const [email, setEmail] = useState(defaultEmail ?? "");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [signUp, setSignUp] = useState(false);
+  const [signUp, setSignUp] = useState(defaultSignUp ?? false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();

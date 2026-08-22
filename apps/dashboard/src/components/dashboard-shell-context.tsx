@@ -4,6 +4,7 @@ import { createContext, useContext } from "react";
 
 export type Stats = { totalRequests: number; blockedRequests: number; discoveredEndpoints: number; shadowApis: number };
 export type Domain = { id: string; hostname: string; status: string; errorMessage?: string | null };
+export type Membership = { tenantId: string; name: string; slug: string; role: string };
 
 export const emptyStats: Stats = { totalRequests: 0, blockedRequests: 0, discoveredEndpoints: 0, shadowApis: 0 };
 
@@ -11,9 +12,11 @@ type ShellData = {
   stats: Stats;
   domains: Domain[];
   refreshDomains: () => void;
+  activeTenantId: string;
+  memberships: Membership[];
 };
 
-export const DashboardShellContext = createContext<ShellData>({ stats: emptyStats, domains: [], refreshDomains: () => {} });
+export const DashboardShellContext = createContext<ShellData>({ stats: emptyStats, domains: [], refreshDomains: () => {}, activeTenantId: "", memberships: [] });
 
 export function useDashboardShell() {
   return useContext(DashboardShellContext);

@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
+import { listUserMemberships } from './storage';
 
 export type AuthContext = {
   userId: string;
-  tenantId?: string;
+  email?: string;
 };
 
 function authConfigured() {
@@ -37,17 +38,39 @@ export async function authenticateRequest(request: Request): Promise<{ ok: true;
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) return { ok: false, status: 401, error: 'Invalid or expired access token' };
 
-  const metadata = data.user.app_metadata as { tenant_id?: unknown } | null;
-  const tenantId = typeof metadata?.tenant_id === 'string' ? metadata.tenant_id : undefined;
-  return { ok: true, context: { userId: data.user.id, tenantId } };
+  return { ok: true, context: { userId: data.user.id, email: data.user.email } };
 }
 
-export async function requireTenant(request: Request): Promise<{ ok: true; tenantId: string; userId: string } | { ok: false; status: 401 | 403 | 503; error: string }> {
+/**
+ * Resolves which tenant a request acts as. A user can belong to N tenants (`user_tenants`); the
+ * `X-Tenant-ID` header is only a *selector* of which membership to use this request - it is never
+ * trusted on its own, always cross-checked against `listUserMemberships(userId)` server-side.
+ */
+export async function requireTenant(request: Request): Promise<{ ok: true; tenantId: string; userId: string } | { ok: false; status: 400 | 401 | 403 | 409 | 503; error: string }> {
   const result = await authenticateRequest(request);
   if (!result.ok) return result;
-  const tenantId = result.context?.tenantId ?? (localAuthAllowed() ? process.env.DURTONE_TENANT_ID ?? localTenantId : undefined);
-  if (!tenantId) return { ok: false, status: 403, error: 'A tenant is required for this operation' };
-  return { ok: true, tenantId, userId: result.context?.userId ?? 'local-dev' };
+
+  const userId = result.context?.userId;
+  if (!userId || userId === 'fleet') {
+    const tenantId = localAuthAllowed() ? process.env.DURTONE_TENANT_ID ?? localTenantId : undefined;
+    if (!tenantId) return { ok: false, status: 403, error: 'A tenant is required for this operation' };
+    return { ok: true, tenantId, userId: userId ?? 'local-dev' };
+  }
+
+  const memberships = await listUserMemberships(userId);
+  if (!memberships || memberships.length === 0) {
+    return { ok: false, status: 409, error: 'no_tenant_membership' };
+  }
+
+  const headerTenantId = request.headers.get('x-tenant-id');
+  if (headerTenantId) {
+    const membership = memberships.find((entry) => entry.tenantId === headerTenantId);
+    if (!membership) return { ok: false, status: 403, error: 'not a member of the requested tenant' };
+    return { ok: true, tenantId: membership.tenantId, userId };
+  }
+
+  if (memberships.length === 1) return { ok: true, tenantId: memberships[0]!.tenantId, userId };
+  return { ok: false, status: 400, error: 'X-Tenant-ID header is required when a user belongs to multiple tenants' };
 }
 
 /** For endpoints only the edge proxy fleet may call (e.g. the routing table) - never tenant-scoped. */

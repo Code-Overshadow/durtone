@@ -4,6 +4,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -25,11 +26,18 @@ export const tenants = pgTable('tenants', {
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey(),
-  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
   email: varchar('email', { length: 320 }).notNull(),
-  role: varchar('role', { length: 24 }).default('member').notNull(),
   ...timestamps,
 });
+
+export const userTenants = pgTable('user_tenants', {
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }).notNull(),
+  role: varchar('role', { length: 24 }).default('member').notNull(),
+  ...timestamps,
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.tenantId] }),
+}));
 
 export const configs = pgTable('configs', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -184,7 +192,7 @@ export const domains = pgTable('domains', {
 });
 
 export const tenantRelations = relations(tenants, ({ many }) => ({
-  users: many(users),
+  userTenants: many(userTenants),
   configs: many(configs),
   logs: many(logs),
   endpoints: many(endpoints),
@@ -203,8 +211,13 @@ export const domainRelations = relations(domains, ({ one }) => ({
   tenant: one(tenants, { fields: [domains.tenantId], references: [tenants.id] }),
 }));
 
-export const userRelations = relations(users, ({ one }) => ({
-  tenant: one(tenants, { fields: [users.tenantId], references: [tenants.id] }),
+export const userRelations = relations(users, ({ many }) => ({
+  userTenants: many(userTenants),
+}));
+
+export const userTenantRelations = relations(userTenants, ({ one }) => ({
+  user: one(users, { fields: [userTenants.userId], references: [users.id] }),
+  tenant: one(tenants, { fields: [userTenants.tenantId], references: [tenants.id] }),
 }));
 
 export const configRelations = relations(configs, ({ one }) => ({
