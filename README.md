@@ -38,7 +38,7 @@ bun install
 bun run dev
 ```
 
-O dashboard inicia em `http://localhost:3001`.
+O dashboard inicia em `http://localhost:3001`. Rotas reais do Next.js App Router (`apps/dashboard/src/app/(dashboard)`): `/` (visão geral), `/logs`, `/surface`, `/cspm`, `/security` e `/settings/{waf,domains,cspm,itdr,tenant,users}` - as duas últimas seções de `/settings` (contas cloud e provedores de identidade) fazem CRUD completo contra `/api/v1/cloud-accounts` e `/api/v1/identity-providers`.
 
 DurtWall (fleet de edge proxy - roda na nossa infra, não na do cliente):
 
