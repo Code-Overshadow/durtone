@@ -2,15 +2,15 @@
 # Worker sem porta exposta (so faz poll no Postgres) - sem [http_service], o Fly nao
 # cria maquina automaticamente no primeiro deploy. Depois do deploy, rode:
 #   fly scale count 1 -a durtone-durtscope
-app = "durtone-durtscope"
-primary_region = "gru"
+app = 'durtone-durtscope'
+primary_region = 'gru'
 
 [build]
-  dockerfile = "Dockerfile.durtscope"
+  dockerfile = 'Dockerfile.durtscope'
 
 [env]
-  NODE_ENV = "production"
+  NODE_ENV = 'production'
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'
