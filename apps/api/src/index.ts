@@ -81,7 +81,7 @@ setInterval(() => void pollPendingDomains(), 60_000);
 const app = new Elysia()
   .onRequest(({ request, set }) => {
     set.headers['Access-Control-Allow-Origin'] = process.env.DASHBOARD_ORIGIN ?? 'http://localhost:3001';
-    set.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
+    set.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Tenant-ID';
     set.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
     if (request.method === 'OPTIONS') {
       set.status = 204;
