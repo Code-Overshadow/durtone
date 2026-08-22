@@ -131,4 +131,25 @@ O quality gate usa checks nativos por stack; PMD Java não se aplica ao monorepo
 
 O workspace possui MCPs para Vercel e Supabase em `.vscode/mcp.json`. O MCP da Vercel usa `VERCEL_TOKEN`; o MCP do Supabase exige um `SUPABASE_ACCESS_TOKEN` próprio, diferente da `SUPABASE_SERVICE_ROLE_KEY`.
 
-O projeto Vercel usa `vercel.json` e o script `bun run vercel:deploy`. O deploy deve ser iniciado explicitamente após o projeto ser vinculado à conta correta.
+O projeto Vercel usa `vercel.json` e o script `bun run vercel:deploy`. O deploy deve ser iniciado explicitamente após o projeto ser vinculado à conta correta. É lá que o **dashboard** é hospedado - não no Fly.io.
+
+### Fly.io (backend)
+
+Não é "uma aplicação" - são **4 apps Fly separados**, cada um com seu próprio `fly.toml` e conjunto de secrets. `apps/api`, `apps/durtguardian` e `apps/durtscope` dependem de `packages/*` via workspace, então usam um `Dockerfile.bun` compartilhado na raiz (build a partir da raiz do repo, parametrizado por `--build-arg APP_DIR`); `apps/durtwall` é um módulo Go independente, com `Dockerfile`/`fly.toml` próprios dentro da própria pasta.
+
+| App Fly | Config | Deploy (a partir da raiz, exceto onde indicado) |
+|---|---|---|
+| `durtone-api` | `fly.api.toml` | `fly deploy --config fly.api.toml` |
+| `durtone-durtguardian` | `fly.durtguardian.toml` | `fly deploy --config fly.durtguardian.toml` (depois: `fly scale count 1 -a durtone-durtguardian`) |
+| `durtone-durtscope` | `fly.durtscope.toml` | `fly deploy --config fly.durtscope.toml` (depois: `fly scale count 1 -a durtone-durtscope`) |
+| `durtone-edge` (DurtWall) | `apps/durtwall/fly.toml` | `cd apps/durtwall && fly deploy` |
+
+Os dois workers (`durtguardian`/`durtscope`) não expõem porta HTTP - só fazem poll no Postgres -, então o Fly não sobe uma máquina automaticamente no primeiro deploy; o `fly scale count 1` acima é necessário.
+
+Secrets por app (nunca em `fly.toml`, sempre via `fly secrets set -a <app>`):
+
+- **`durtone-api`**: `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, `CREDENTIAL_ENCRYPTION_KEY`, `EDGE_FLEET_TOKEN`, `FLY_API_TOKEN`, `FLY_APP_NAME` (= `durtone-edge`, não o próprio nome), `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `DASHBOARD_ORIGIN`.
+- **`durtone-durtguardian`** e **`durtone-durtscope`**: `DATABASE_URL` e `CREDENTIAL_ENCRYPTION_KEY` — precisam ser **idênticos** aos do `durtone-api` (mesmo banco, mesma chave de criptografia).
+- **`durtone-edge`**: `DURTWALL_CONTROL_PLANE_URL` (URL pública do `durtone-api`) e `DURTWALL_FLEET_TOKEN` (idêntico ao `EDGE_FLEET_TOKEN` do `durtone-api`).
+
+`durtone-api` e `durtone-durtguardian` já foram validados localmente (`docker build -f Dockerfile.bun --build-arg APP_DIR=apps/api .` e equivalente pra `apps/durtguardian`) - suba com o binário real do Prowler instalado na imagem antes de contar com scans de CSPM de verdade em produção. Os `fly.toml` não foram validados contra uma conta Fly real (`flyctl` não está disponível neste ambiente) - rode `fly config validate` antes do primeiro deploy.

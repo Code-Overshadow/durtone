@@ -1,0 +1,25 @@
+# Secrets - never bake these into an image layer
+.env
+.env.*
+!.env.example
+
+# Tooling and generated output
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+coverage
+.vercel
+.git
+.github
+
+# Go build output (irrelevant to the Bun images, harmless to skip either way)
+apps/durtwall/durtwall
+apps/durtwall/*.exe
+apps/durtwall/durtwall-linux-*
+
+# Local-only planning docs
+/knowledge_base
+/.copilot

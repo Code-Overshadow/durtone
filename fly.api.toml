@@ -1,0 +1,32 @@
+# Deploy: fly deploy --config fly.api.toml (a partir da raiz do repo)
+app = "durtone-api"
+primary_region = "gru"
+
+[build]
+  dockerfile = "Dockerfile.bun"
+
+[build.args]
+  APP_DIR = "apps/api"
+
+[env]
+  PORT = "3000"
+  NODE_ENV = "production"
+  DURTONE_AUTH_REQUIRED = "true"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "3s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
