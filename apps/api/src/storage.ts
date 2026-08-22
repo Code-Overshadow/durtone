@@ -485,6 +485,223 @@ export async function listActiveRoutes(): Promise<EdgeRoute[]> {
  * comparison in discovery.ts is also global), so this always records `documented: false, shadow: false`
  * rather than guess - a false "shadow API" alert is worse than a missed one. Tracked as backlog.
  */
+export type PersistedTenant = {
+  id: string;
+  name: string;
+  slug: string;
+  createdAt: string;
+};
+
+export async function getTenant(tenantId: string): Promise<PersistedTenant | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<PersistedTenant[]>`
+    select id, name, slug, created_at as "createdAt" from tenants where id = ${tenantId} limit 1
+  `;
+  return row;
+}
+
+export async function updateTenantName(tenantId: string, name: string): Promise<PersistedTenant | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<PersistedTenant[]>`
+    update tenants set name = ${name}, updated_at = now() where id = ${tenantId}
+    returning id, name, slug, created_at as "createdAt"
+  `;
+  return row;
+}
+
+export type PersistedUser = {
+  id: string;
+  email: string;
+  role: string;
+  createdAt: string;
+};
+
+export async function listTenantUsers(tenantId: string): Promise<PersistedUser[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<PersistedUser[]>`
+    select id, email, role, created_at as "createdAt" from users where tenant_id = ${tenantId} order by created_at asc
+  `;
+}
+
+export async function updateTenantUserRole(tenantId: string, userId: string, role: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`update users set role = ${role}, updated_at = now() where tenant_id = ${tenantId} and id = ${userId}`;
+  return result.count > 0;
+}
+
+export async function deleteTenantUser(tenantId: string, userId: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`delete from users where tenant_id = ${tenantId} and id = ${userId}`;
+  return result.count > 0;
+}
+
+export type PersistedInvitation = {
+  id: string;
+  email: string;
+  role: string;
+  createdAt: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+};
+
+export async function insertInvitation(tenantId: string, email: string, role: string, tokenHash: string, expiresAt: Date, invitedBy?: string): Promise<PersistedInvitation | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<PersistedInvitation[]>`
+    insert into tenant_invitations (tenant_id, email, role, token_hash, invited_by, expires_at)
+    values (${tenantId}, ${email}, ${role}, ${tokenHash}, ${invitedBy ?? null}, ${expiresAt})
+    returning id, email, role, created_at as "createdAt", expires_at as "expiresAt", accepted_at as "acceptedAt"
+  `;
+  return row;
+}
+
+export async function listInvitations(tenantId: string): Promise<PersistedInvitation[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<PersistedInvitation[]>`
+    select id, email, role, created_at as "createdAt", expires_at as "expiresAt", accepted_at as "acceptedAt"
+    from tenant_invitations where tenant_id = ${tenantId} order by created_at desc
+  `;
+}
+
+export async function deleteInvitation(tenantId: string, id: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`delete from tenant_invitations where tenant_id = ${tenantId} and id = ${id}`;
+  return result.count > 0;
+}
+
+export type PersistedCloudAccount = {
+  id: string;
+  provider: string;
+  accountId: string;
+  displayName: string;
+  regions: string[];
+  enabled: boolean;
+  lastScanAt: string | null;
+  createdAt: string;
+};
+
+const CLOUD_ACCOUNT_COLUMNS = `id, provider, account_id as "accountId", display_name as "displayName", regions, enabled,
+      last_scan_at as "lastScanAt", created_at as "createdAt"`;
+
+export async function listCloudAccounts(tenantId: string): Promise<PersistedCloudAccount[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client.unsafe<PersistedCloudAccount[]>(
+    `select ${CLOUD_ACCOUNT_COLUMNS} from cloud_accounts where tenant_id = $1 order by created_at asc`,
+    [tenantId],
+  );
+}
+
+export async function insertCloudAccount(tenantId: string, input: { provider: string; accountId: string; displayName: string; regions: string[]; credentialRef: string }): Promise<PersistedCloudAccount | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client.unsafe<PersistedCloudAccount[]>(
+    `insert into cloud_accounts (tenant_id, provider, account_id, display_name, credential_ref, regions)
+     values ($1, $2, $3, $4, $5, '${jsonLiteral(input.regions)}'::jsonb)
+     returning ${CLOUD_ACCOUNT_COLUMNS}`,
+    [tenantId, input.provider, input.accountId, input.displayName, input.credentialRef],
+  );
+  return row;
+}
+
+export async function updateCloudAccount(tenantId: string, id: string, input: { displayName: string; regions: string[]; enabled: boolean; credentialRef?: string }): Promise<PersistedCloudAccount | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = input.credentialRef
+    ? await client.unsafe<PersistedCloudAccount[]>(
+        `update cloud_accounts set display_name = $1, regions = '${jsonLiteral(input.regions)}'::jsonb, enabled = $2, credential_ref = $3, updated_at = now()
+         where tenant_id = $4 and id = $5
+         returning ${CLOUD_ACCOUNT_COLUMNS}`,
+        [input.displayName, input.enabled, input.credentialRef, tenantId, id],
+      )
+    : await client.unsafe<PersistedCloudAccount[]>(
+        `update cloud_accounts set display_name = $1, regions = '${jsonLiteral(input.regions)}'::jsonb, enabled = $2, updated_at = now()
+         where tenant_id = $3 and id = $4
+         returning ${CLOUD_ACCOUNT_COLUMNS}`,
+        [input.displayName, input.enabled, tenantId, id],
+      );
+  return row;
+}
+
+export async function deleteCloudAccount(tenantId: string, id: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`delete from cloud_accounts where tenant_id = ${tenantId} and id = ${id}`;
+  return result.count > 0;
+}
+
+export type PersistedIdentityProvider = {
+  id: string;
+  kind: string;
+  displayName: string;
+  baseUrl: string | null;
+  realmOrTenant: string | null;
+  region: string | null;
+  clientId: string | null;
+  enabled: boolean;
+  lastSyncAt: string | null;
+  createdAt: string;
+};
+
+export async function listIdentityProviders(tenantId: string): Promise<PersistedIdentityProvider[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<PersistedIdentityProvider[]>`
+    select id, kind, display_name as "displayName", base_url as "baseUrl", realm_or_tenant as "realmOrTenant",
+      region, client_id as "clientId", enabled, last_sync_at as "lastSyncAt", created_at as "createdAt"
+    from identity_providers where tenant_id = ${tenantId} order by created_at asc
+  `;
+}
+
+export async function insertIdentityProvider(tenantId: string, input: { kind: string; displayName: string; baseUrl?: string; realmOrTenant?: string; region?: string; clientId?: string; credentialRef: string }): Promise<PersistedIdentityProvider | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<PersistedIdentityProvider[]>`
+    insert into identity_providers (tenant_id, kind, display_name, base_url, realm_or_tenant, region, client_id, credential_ref)
+    values (${tenantId}, ${input.kind}, ${input.displayName}, ${input.baseUrl ?? null}, ${input.realmOrTenant ?? null}, ${input.region ?? null}, ${input.clientId ?? null}, ${input.credentialRef})
+    returning id, kind, display_name as "displayName", base_url as "baseUrl", realm_or_tenant as "realmOrTenant",
+      region, client_id as "clientId", enabled, last_sync_at as "lastSyncAt", created_at as "createdAt"
+  `;
+  return row;
+}
+
+export async function updateIdentityProvider(tenantId: string, id: string, input: { displayName: string; baseUrl?: string; realmOrTenant?: string; region?: string; clientId?: string; enabled: boolean; credentialRef?: string }): Promise<PersistedIdentityProvider | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = input.credentialRef
+    ? await client<PersistedIdentityProvider[]>`
+        update identity_providers set display_name = ${input.displayName}, base_url = ${input.baseUrl ?? null},
+          realm_or_tenant = ${input.realmOrTenant ?? null}, region = ${input.region ?? null}, client_id = ${input.clientId ?? null},
+          enabled = ${input.enabled}, credential_ref = ${input.credentialRef}, updated_at = now()
+        where tenant_id = ${tenantId} and id = ${id}
+        returning id, kind, display_name as "displayName", base_url as "baseUrl", realm_or_tenant as "realmOrTenant",
+          region, client_id as "clientId", enabled, last_sync_at as "lastSyncAt", created_at as "createdAt"
+      `
+    : await client<PersistedIdentityProvider[]>`
+        update identity_providers set display_name = ${input.displayName}, base_url = ${input.baseUrl ?? null},
+          realm_or_tenant = ${input.realmOrTenant ?? null}, region = ${input.region ?? null}, client_id = ${input.clientId ?? null},
+          enabled = ${input.enabled}, updated_at = now()
+        where tenant_id = ${tenantId} and id = ${id}
+        returning id, kind, display_name as "displayName", base_url as "baseUrl", realm_or_tenant as "realmOrTenant",
+          region, client_id as "clientId", enabled, last_sync_at as "lastSyncAt", created_at as "createdAt"
+      `;
+  return row;
+}
+
+export async function deleteIdentityProvider(tenantId: string, id: string): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`delete from identity_providers where tenant_id = ${tenantId} and id = ${id}`;
+  return result.count > 0;
+}
+
 export async function recordObservedEndpoint(tenantId: string, method: string, path: string, statusCode: number) {
   const client = database();
   if (!client || !tenantId) return false;

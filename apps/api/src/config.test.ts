@@ -1,21 +1,17 @@
 import { expect, test } from 'bun:test';
 import { getWafConfig, updateWafConfig } from './config';
 
-test('masks DurtScope credentials while preserving them across dashboard updates', () => {
+test('updates and persists the WAF upstream/mode/webhook config', () => {
   const saved = updateWafConfig({
     upstream: 'http://localhost:3001',
     mode: 'block',
-    identityProvider: 'okta',
-    identityBaseUrl: 'https://example.okta.com',
-    identityClientSecret: 'okta-secret',
+    alertWebhookUrl: 'https://hooks.example.com/alerts',
   });
 
-  expect(saved.identityClientSecret).toBe('********');
+  expect(saved.upstream).toBe('http://localhost:3001');
+  expect(saved.mode).toBe('block');
 
-  const updated = updateWafConfig({
-    ...saved,
-    upstream: 'http://localhost:3002',
-  });
-  expect(updated.identityClientSecret).toBe('********');
+  updateWafConfig({ upstream: 'http://localhost:3002', mode: 'monitor' });
   expect(getWafConfig().upstream).toBe('http://localhost:3002');
+  expect(getWafConfig().mode).toBe('monitor');
 });
