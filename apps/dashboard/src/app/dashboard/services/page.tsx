@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight, Globe, ShieldCheck, UserCog, Zap } from "lucide-react";
+import { ArrowUpRight, ShieldCheck, UserCog, Zap } from "lucide-react";
 import { apiGet } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useDashboardShell, describeDomainStatus } from "@/components/dashboard-shell-context";
@@ -22,21 +22,15 @@ export default function ServicesPage() {
   const providers = providersResource.data?.providers ?? [];
   const enabledAccounts = cloudAccounts.filter((account) => account.enabled).length;
   const enabledProviders = providers.filter((provider) => provider.enabled).length;
+  const wafStatus = configResource.data ? `Upstream: ${configResource.data.upstream} · ${domainStatus.label}` : "Ainda não configurado";
 
   const tiles = [
     {
       href: "/dashboard/services/waf",
       icon: Zap,
       name: "DurtWall",
-      description: "WAF e rate limiting gerenciados. Bloqueia OWASP Top 10 no tráfego do seu domínio antes de chegar no seu servidor.",
-      status: configResource.data ? `Upstream: ${configResource.data.upstream}` : "Ainda não configurado",
-    },
-    {
-      href: "/dashboard/services/domains",
-      icon: Globe,
-      name: "Domínios",
-      description: "Domínios protegidos pelo DurtWall. Aponte um CNAME e o certificado TLS é emitido automaticamente.",
-      status: domainStatus.label,
+      description: "WAF, rate limiting e domínios gerenciados. Bloqueia OWASP Top 10 no tráfego do seu domínio antes de chegar no seu servidor.",
+      status: wafStatus,
     },
     {
       href: "/dashboard/services/cspm",
