@@ -3,12 +3,14 @@
 import { apiGet } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { EmptyState, SectionHeading } from "@/components/dashboard-ui";
 
 type RequestLog = { id: string; method: string; path: string; status: number; remoteIp: string; blocked: boolean; timestamp: string };
 
 export default function LogsPage() {
-  const logsResource = usePollingResource(() => apiGet<{ logs: RequestLog[] }>("/api/v1/logs"));
+  const { refreshIntervals } = useDashboardShell();
+  const logsResource = usePollingResource(() => apiGet<{ logs: RequestLog[] }>("/api/v1/logs"), { intervalMs: refreshIntervals.logs });
   useRefreshable(() => void logsResource.refresh());
   const logs = logsResource.data?.logs ?? [];
 

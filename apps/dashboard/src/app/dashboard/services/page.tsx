@@ -12,10 +12,10 @@ type CloudAccount = { enabled: boolean };
 type IdentityProvider = { enabled: boolean };
 
 export default function ServicesPage() {
-  const { domains } = useDashboardShell();
-  const configResource = usePollingResource(() => apiGet<Config>("/api/v1/config"), { intervalMs: 60_000 });
-  const cloudAccountsResource = usePollingResource(() => apiGet<{ accounts: CloudAccount[] }>("/api/v1/cloud-accounts"), { intervalMs: 60_000 });
-  const providersResource = usePollingResource(() => apiGet<{ providers: IdentityProvider[] }>("/api/v1/identity-providers"), { intervalMs: 60_000 });
+  const { domains, refreshIntervals } = useDashboardShell();
+  const configResource = usePollingResource(() => apiGet<Config>("/api/v1/config"), { intervalMs: refreshIntervals.stats });
+  const cloudAccountsResource = usePollingResource(() => apiGet<{ accounts: CloudAccount[] }>("/api/v1/cloud-accounts"), { intervalMs: refreshIntervals.cspm });
+  const providersResource = usePollingResource(() => apiGet<{ providers: IdentityProvider[] }>("/api/v1/identity-providers"), { intervalMs: refreshIntervals.itdr });
 
   const domainStatus = describeDomainStatus(domains);
   const cloudAccounts = cloudAccountsResource.data?.accounts ?? [];

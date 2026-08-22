@@ -3,12 +3,14 @@
 import { apiGet } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { EmptyState, SectionHeading } from "@/components/dashboard-ui";
 
 type Endpoint = { method: string; path: string; count: number; documented: boolean; shadow: boolean };
 
 export default function SurfacePage() {
-  const endpointsResource = usePollingResource(() => apiGet<{ endpoints: Endpoint[] }>("/api/v1/endpoints"));
+  const { refreshIntervals } = useDashboardShell();
+  const endpointsResource = usePollingResource(() => apiGet<{ endpoints: Endpoint[] }>("/api/v1/endpoints"), { intervalMs: refreshIntervals.endpoints });
   useRefreshable(() => void endpointsResource.refresh());
   const endpoints = endpointsResource.data?.endpoints ?? [];
 

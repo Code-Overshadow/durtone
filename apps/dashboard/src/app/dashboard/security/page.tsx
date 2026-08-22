@@ -4,6 +4,7 @@ import { Activity, Gauge, Shield } from "lucide-react";
 import { apiDownload, apiGet } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { EmptyState, Metric, SectionHeading } from "@/components/dashboard-ui";
 
 type SecurityScore = { score: number; components: { waf: number; cspm: number; itdr: number }; weights: { waf: number; cspm: number; itdr: number } };
@@ -20,8 +21,9 @@ function describeCorrelation(correlation: Correlation) {
 }
 
 export default function SecurityPage() {
-  const securityScoreResource = usePollingResource(() => apiGet<SecurityScore>("/api/v1/security/score"));
-  const correlationsResource = usePollingResource(() => apiGet<{ correlations: Correlation[] }>("/api/v1/security/correlations"));
+  const { refreshIntervals } = useDashboardShell();
+  const securityScoreResource = usePollingResource(() => apiGet<SecurityScore>("/api/v1/security/score"), { intervalMs: refreshIntervals.security });
+  const correlationsResource = usePollingResource(() => apiGet<{ correlations: Correlation[] }>("/api/v1/security/correlations"), { intervalMs: refreshIntervals.security });
   useRefreshable(() => { void securityScoreResource.refresh(); void correlationsResource.refresh(); });
 
   const current = securityScoreResource.data ?? emptyScore;

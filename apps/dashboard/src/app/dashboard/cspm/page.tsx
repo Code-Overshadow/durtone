@@ -4,6 +4,7 @@ import { CheckCircle2, AlertTriangle, Gauge, Shield } from "lucide-react";
 import { apiGet } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { EmptyState, Metric, SectionHeading } from "@/components/dashboard-ui";
 
 type CspmDrift = { kind: "changed" | "new" | "missing"; resource: string; before?: string; after?: string };
@@ -12,7 +13,8 @@ type CspmSummary = { provider: string; accountId: string; postureScore: number; 
 const emptySummary: CspmSummary = { provider: "aws", accountId: "n/a", postureScore: 0, totalChecks: 0, passChecks: 0, failChecks: 0, criticalFindings: 0, driftCount: 0, lastScanAt: new Date(0).toISOString(), drifts: [] };
 
 export default function CspmPage() {
-  const cspmResource = usePollingResource(() => apiGet<CspmSummary>("/api/v1/cspm/summary"));
+  const { refreshIntervals } = useDashboardShell();
+  const cspmResource = usePollingResource(() => apiGet<CspmSummary>("/api/v1/cspm/summary"), { intervalMs: refreshIntervals.cspm });
   useRefreshable(() => void cspmResource.refresh());
   const metrics = cspmResource.data ?? emptySummary;
 

@@ -21,6 +21,7 @@ export const tenants = pgTable('tenants', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 160 }).notNull(),
   slug: varchar('slug', { length: 160 }).notNull().unique(),
+  settings: jsonb('settings').$type<Record<string, unknown>>().default({}).notNull(),
   ...timestamps,
 });
 

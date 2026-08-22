@@ -12,9 +12,9 @@ type RequestLog = { id: string; method: string; path: string; status: number; re
 type Endpoint = { method: string; path: string; count: number; documented: boolean; shadow: boolean };
 
 export default function OverviewPage() {
-  const { stats } = useDashboardShell();
-  const logsResource = usePollingResource(() => apiGet<{ logs: RequestLog[] }>("/api/v1/logs"));
-  const endpointsResource = usePollingResource(() => apiGet<{ endpoints: Endpoint[] }>("/api/v1/endpoints"));
+  const { stats, refreshIntervals } = useDashboardShell();
+  const logsResource = usePollingResource(() => apiGet<{ logs: RequestLog[] }>("/api/v1/logs"), { intervalMs: refreshIntervals.logs });
+  const endpointsResource = usePollingResource(() => apiGet<{ endpoints: Endpoint[] }>("/api/v1/endpoints"), { intervalMs: refreshIntervals.endpoints });
   useRefreshable(() => { void logsResource.refresh(); void endpointsResource.refresh(); });
 
   const logs = logsResource.data?.logs ?? [];

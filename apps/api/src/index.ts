@@ -7,7 +7,7 @@ import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
 import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
-import { deleteCloudAccount, deleteDomain, deleteIdentityProvider, deleteInvitation, deleteTenantMembership, ensureUserProfile, findInvitationByToken, generateUniqueTenantSlug, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, getTenant, insertCloudAccount, insertDomain, insertIdentityProvider, insertInvitation, insertMembership, insertTenant, listActiveRoutes, listCloudAccounts, listCorrelations, listDomains, listIdentityProviders, listInvitations, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, listTenantMembers, listUserMemberships, markInvitationAccepted, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateCloudAccount, updateDomainStatus, updateIdentityProvider, updateIdentityStatus, updateTenantMembershipRole, updateTenantName, type PersistedScan } from './storage';
+import { deleteCloudAccount, deleteDomain, deleteIdentityProvider, deleteInvitation, deleteTenantMembership, ensureUserProfile, findInvitationByToken, generateUniqueTenantSlug, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, getTenant, insertCloudAccount, insertDomain, insertIdentityProvider, insertInvitation, insertMembership, insertTenant, listActiveRoutes, listCloudAccounts, listCorrelations, listDomains, listIdentityProviders, listInvitations, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, listTenantMembers, listUserMemberships, markInvitationAccepted, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateCloudAccount, updateDomainStatus, updateIdentityProvider, updateIdentityStatus, updateTenantMembershipRole, updateTenantName, updateTenantSettings, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -23,6 +23,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const USER_ROLES = ['owner', 'admin', 'member'] as const;
 const CLOUD_PROVIDERS = ['aws', 'azure', 'gcp'] as const;
 const IDENTITY_PROVIDER_KINDS = ['keycloak', 'okta', 'aws', 'google'] as const;
+const REFRESH_INTERVAL_KEYS = ['stats', 'logs', 'endpoints', 'domains', 'cspm', 'itdr', 'security'] as const;
 
 onEvent('waf.attack', async (event) => {
   if (!event.tenantId) return;
@@ -544,10 +545,22 @@ const app = new Elysia()
       set.status = 400;
       return { error: 'tenant name is required' };
     }
-    const record = await updateTenantName(tenant.tenantId, name);
+    let record = await updateTenantName(tenant.tenantId, name);
     if (!record) {
       set.status = 503;
       return { error: 'tenant storage is unavailable' };
+    }
+    const refreshIntervalsInput = (body as { refreshIntervals?: unknown }).refreshIntervals;
+    if (refreshIntervalsInput && typeof refreshIntervalsInput === 'object') {
+      const sanitized: Record<string, number> = {};
+      for (const key of REFRESH_INTERVAL_KEYS) {
+        const value = (refreshIntervalsInput as Record<string, unknown>)[key];
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          sanitized[key] = Math.min(300_000, Math.max(5_000, Math.round(value)));
+        }
+      }
+      const updated = await updateTenantSettings(tenant.tenantId, { ...record.settings, refreshIntervals: sanitized });
+      if (updated) record = updated;
     }
     return record;
   })

@@ -5,6 +5,7 @@ import { AlertTriangle, Plus, Trash2, Users } from "lucide-react";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
 
 type IdentityProvider = { id: string; kind: string; displayName: string; baseUrl: string | null; realmOrTenant: string | null; region: string | null; clientId: string | null; enabled: boolean };
@@ -22,7 +23,8 @@ function buildCredential(form: typeof emptyForm) {
 const KIND_LABEL: Record<string, string> = { keycloak: "Keycloak", okta: "Okta", aws: "AWS IAM", google: "Google Workspace" };
 
 export default function ItdrSettingsPage() {
-  const providersResource = usePollingResource(() => apiGet<{ providers: IdentityProvider[] }>("/api/v1/identity-providers"));
+  const { refreshIntervals } = useDashboardShell();
+  const providersResource = usePollingResource(() => apiGet<{ providers: IdentityProvider[] }>("/api/v1/identity-providers"), { intervalMs: refreshIntervals.itdr });
   useRefreshable(() => void providersResource.refresh());
   const providers = providersResource.data?.providers ?? [];
 

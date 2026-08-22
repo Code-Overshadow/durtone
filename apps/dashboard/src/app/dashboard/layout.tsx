@@ -13,7 +13,9 @@ import { LoginScreen } from "@/components/login-screen";
 import { OnboardingScreen } from "@/components/onboarding-screen";
 import { TenantSwitcher } from "@/components/tenant-switcher";
 import { NAV_ITEMS } from "@/components/nav-items";
-import { DashboardShellContext, describeDomainStatus, emptyStats, type Domain, type Membership, type Stats } from "@/components/dashboard-shell-context";
+import { DashboardShellContext, describeDomainStatus, emptyStats, mergeRefreshIntervals, type Domain, type Membership, type Stats } from "@/components/dashboard-shell-context";
+
+type TenantSettings = { settings?: { refreshIntervals?: Record<string, unknown> } };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { session, checkingSession, signOut } = useSupabaseSession();
@@ -24,8 +26,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const enabled = Boolean(session);
   const membershipsResource = usePollingResource(() => apiGet<{ memberships: Membership[] }>("/api/v1/tenants"), { enabled, intervalMs: 60_000 });
-  const statsResource = usePollingResource(() => apiGet<Stats>("/api/v1/stats"), { enabled });
-  const domainsResource = usePollingResource(() => apiGet<{ domains: Domain[] }>("/api/v1/domains"), { enabled });
+  const tenantSettingsResource = usePollingResource(() => apiGet<TenantSettings>("/api/v1/tenant"), { enabled, intervalMs: 60_000 });
+  const refreshIntervals = mergeRefreshIntervals(tenantSettingsResource.data?.settings?.refreshIntervals);
+  const statsResource = usePollingResource(() => apiGet<Stats>("/api/v1/stats"), { enabled, intervalMs: refreshIntervals.stats });
+  const domainsResource = usePollingResource(() => apiGet<{ domains: Domain[] }>("/api/v1/domains"), { enabled, intervalMs: refreshIntervals.domains });
 
   if (checkingSession) return <div className="auth-shell"><div className="loader-line" /></div>;
   if (!session) return <LoginScreen error={authError} onError={setAuthError} />;
@@ -64,7 +68,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return pathname === href;
   }
 
-  return <DashboardShellContext.Provider value={{ stats, domains, refreshDomains: () => void domainsResource.refresh(), activeTenantId, memberships }}>
+  return <DashboardShellContext.Provider value={{ stats, domains, refreshDomains: () => void domainsResource.refresh(), activeTenantId, memberships, refreshIntervals }}>
     <div className="dashboard-shell">
       <aside className={mobileNav ? "sidebar sidebar-open" : "sidebar"}>
         <div className="brand"><span className="brand-mark"><Shield size={17} /></span><span>DurtOne</span><button className="icon-button close-nav" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={17} /></button></div>

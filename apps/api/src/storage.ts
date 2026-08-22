@@ -481,25 +481,39 @@ export type PersistedTenant = {
   id: string;
   name: string;
   slug: string;
+  settings: Record<string, unknown>;
   createdAt: string;
 };
+
+const TENANT_COLUMNS = `id, name, slug, settings, created_at as "createdAt"`;
 
 export async function getTenant(tenantId: string): Promise<PersistedTenant | undefined> {
   const client = database();
   if (!client) return undefined;
-  const [row] = await client<PersistedTenant[]>`
-    select id, name, slug, created_at as "createdAt" from tenants where id = ${tenantId} limit 1
-  `;
+  const [row] = await client.unsafe<PersistedTenant[]>(
+    `select ${TENANT_COLUMNS} from tenants where id = $1 limit 1`,
+    [tenantId],
+  );
   return row;
 }
 
 export async function updateTenantName(tenantId: string, name: string): Promise<PersistedTenant | undefined> {
   const client = database();
   if (!client) return undefined;
-  const [row] = await client<PersistedTenant[]>`
-    update tenants set name = ${name}, updated_at = now() where id = ${tenantId}
-    returning id, name, slug, created_at as "createdAt"
-  `;
+  const [row] = await client.unsafe<PersistedTenant[]>(
+    `update tenants set name = $1, updated_at = now() where id = $2 returning ${TENANT_COLUMNS}`,
+    [name, tenantId],
+  );
+  return row;
+}
+
+export async function updateTenantSettings(tenantId: string, settings: Record<string, unknown>): Promise<PersistedTenant | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client.unsafe<PersistedTenant[]>(
+    `update tenants set settings = '${jsonLiteral(settings)}'::jsonb, updated_at = now() where id = $1 returning ${TENANT_COLUMNS}`,
+    [tenantId],
+  );
   return row;
 }
 

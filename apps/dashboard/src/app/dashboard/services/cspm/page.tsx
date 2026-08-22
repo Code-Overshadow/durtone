@@ -5,6 +5,7 @@ import { AlertTriangle, Cloud, Plus, Trash2 } from "lucide-react";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
 
 type CloudAccount = { id: string; provider: string; accountId: string; displayName: string; regions: string[]; enabled: boolean; lastScanAt: string | null };
@@ -19,7 +20,8 @@ function buildCredential(form: typeof emptyForm) {
 }
 
 export default function CspmSettingsPage() {
-  const accountsResource = usePollingResource(() => apiGet<{ accounts: CloudAccount[] }>("/api/v1/cloud-accounts"));
+  const { refreshIntervals } = useDashboardShell();
+  const accountsResource = usePollingResource(() => apiGet<{ accounts: CloudAccount[] }>("/api/v1/cloud-accounts"), { intervalMs: refreshIntervals.cspm });
   useRefreshable(() => void accountsResource.refresh());
   const accounts = accountsResource.data?.accounts ?? [];
 
