@@ -6,7 +6,7 @@ import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
 import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
-import { deleteDomain, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, insertDomain, listActiveRoutes, listDomains, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateDomainStatus, updateIdentityStatus, type PersistedScan } from './storage';
+import { deleteDomain, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, insertDomain, listActiveRoutes, listCorrelations, listDomains, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateDomainStatus, updateIdentityStatus, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -16,16 +16,33 @@ import { authenticateRequest, requireFleet, requireTenant } from './auth';
 import { allowRequest } from './rateLimit';
 
 const port = Number(process.env.PORT ?? 3000);
-const correlations: Array<Record<string, unknown>> = [];
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$/;
 
-onEvent('waf.attack', (event) => {
+onEvent('waf.attack', async (event) => {
   if (!event.tenantId) return;
-  correlations.push({ eventId: event.id, source: 'durtwall', result: correlateWafAttack(event.payload as WafAttack, listSecurityIdentities(event.tenantId)) });
+  const identities = (await listPersistedIdentities(event.tenantId)) ?? listSecurityIdentities(event.tenantId);
+  const result = correlateWafAttack(event.payload as WafAttack, identities);
+  await recordAuditLog({
+    tenantId: event.tenantId,
+    actorType: 'system',
+    actorId: 'correlation-engine',
+    action: 'correlation.detected',
+    targetType: 'waf-attack',
+    metadata: { source: 'durtwall', eventId: event.id, result },
+  });
 });
-onEvent('cspm.drift', (event) => {
+onEvent('cspm.drift', async (event) => {
   if (!event.tenantId) return;
-  correlations.push({ eventId: event.id, source: 'durtguardian', result: correlateGuardianChange(event.payload as CspmChange, listSecurityIdentities(event.tenantId)) });
+  const identities = (await listPersistedIdentities(event.tenantId)) ?? listSecurityIdentities(event.tenantId);
+  const result = correlateGuardianChange(event.payload as CspmChange, identities);
+  await recordAuditLog({
+    tenantId: event.tenantId,
+    actorType: 'system',
+    actorId: 'correlation-engine',
+    action: 'correlation.detected',
+    targetType: 'cspm-drift',
+    metadata: { source: 'durtguardian', eventId: event.id, result },
+  });
 });
 
 async function applyCertificateStatus(domainId: string, cert: FlyCertificateStatus) {
@@ -333,17 +350,6 @@ const app = new Elysia()
       return { error: error instanceof Error ? error.message : 'revoke failed' };
     }
   })
-  .post('/api/v1/cspm/drifts', ({ body, set }) => {
-    try {
-      const change = body as CspmChange;
-      if (!change.resource || !change.kind) throw new Error('invalid drift');
-      void publishEvent({ type: 'cspm.drift', payload: change });
-      return { accepted: true };
-    } catch {
-      set.status = 400;
-      return { error: 'invalid CSPM drift' };
-    }
-  })
   .get('/api/v1/security/score', async ({ request, set }) => {
     const tenant = await requireTenant(request);
     if (!tenant.ok) {
@@ -356,7 +362,14 @@ const app = new Elysia()
       itdr: (await getPersistedIdentityHygiene(tenant.tenantId)) ?? getIdentityHygiene(tenant.tenantId),
     });
   })
-  .get('/api/v1/security/correlations', () => ({ correlations: correlations.slice(-100).reverse() }))
+  .get('/api/v1/security/correlations', async ({ request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    return { correlations: (await listCorrelations(tenant.tenantId)) ?? [] };
+  })
   .get('/api/v1/security/report.pdf', async ({ request, set }) => {
     const tenant = await requireTenant(request);
     if (!tenant.ok) {

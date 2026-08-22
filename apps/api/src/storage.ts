@@ -215,7 +215,7 @@ export type PersistedIdentity = {
   externalId: string;
   name: string;
   kind: string;
-  status: string;
+  status: 'active' | 'suspended' | 'inactive';
   permissions: string[];
   ipAddresses: string[];
   riskScore: number;
@@ -321,6 +321,25 @@ export async function recordAuditLog(input: AuditLogInput) {
     [input.tenantId, input.actorType, input.actorId, input.action, input.targetType ?? null, input.targetId ?? null, previousHash, hash],
   );
   return { hash, previousHash };
+}
+
+export type PersistedCorrelation = {
+  id: string;
+  source: string;
+  result: Record<string, unknown>;
+  createdAt: string;
+};
+
+export async function listCorrelations(tenantId: string, limit = 100): Promise<PersistedCorrelation[] | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  return client<PersistedCorrelation[]>`
+    select id, metadata->>'source' as "source", metadata->'result' as "result", created_at as "createdAt"
+    from audit_logs
+    where tenant_id = ${tenantId} and action = 'correlation.detected'
+    order by created_at desc
+    limit ${limit}
+  `;
 }
 
 export type PersistedDomain = {
