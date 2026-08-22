@@ -1,0 +1,26 @@
+name: fly deploy durtguardian
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/durtguardian/**
+      - packages/**
+      - Dockerfile.durtguardian
+      - fly.durtguardian.toml
+      - bun.lock
+  workflow_dispatch:
+
+concurrency:
+  group: fly-deploy-durtguardian
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
+      - run: flyctl deploy --config fly.durtguardian.toml --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

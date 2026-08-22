@@ -1,0 +1,23 @@
+name: fly deploy durtwall
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/durtwall/**
+  workflow_dispatch:
+
+concurrency:
+  group: fly-deploy-durtwall
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
+      - run: flyctl deploy --remote-only
+        working-directory: apps/durtwall
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
