@@ -152,6 +152,17 @@ Secrets por app (nunca em `fly.toml`, sempre via `fly secrets set -a <app>`):
 - **`durtone-durtguardian`** e **`durtone-durtscope`**: `DATABASE_URL` e `CREDENTIAL_ENCRYPTION_KEY` — precisam ser **idênticos** aos do `durtone-api` (mesmo banco, mesma chave de criptografia).
 - **`durtone-edge`**: `DURTWALL_CONTROL_PLANE_URL` (URL pública do `durtone-api`) e `DURTWALL_FLEET_TOKEN` (idêntico ao `EDGE_FLEET_TOKEN` do `durtone-api`).
 
+Secrets do **GitHub** (Settings → Secrets and variables → Actions do repo), um token de deploy por app (`flyctl tokens create deploy -a <app>`), cada um com nome diferente pra não sobrescrever o outro - os workflows já leem esses nomes:
+
+| Secret no GitHub | App Fly | Gerar com |
+|---|---|---|
+| `FLY_DEPLOY_TOKEN_API` | `durtone-api` | `flyctl tokens create deploy -a durtone-api` |
+| `FLY_DEPLOY_TOKEN_DURTGUARDIAN` | `durtone-durtguardian` | `flyctl tokens create deploy -a durtone-durtguardian` |
+| `FLY_DEPLOY_TOKEN_DURTSCOPE` | `durtone-durtscope` | `flyctl tokens create deploy -a durtone-durtscope` |
+| `FLY_DEPLOY_TOKEN_DURTWALL` | `durtone-edge` | `flyctl tokens create deploy -a durtone-edge` |
+
+Sem nenhuma relação com o secret de runtime `FLY_API_TOKEN` do próprio `durtone-api` (linha acima) - esse é o token da própria API pra chamar a API de certificados do Fly; os `FLY_DEPLOY_TOKEN_*` são só pro GitHub Actions autenticar o `flyctl deploy`.
+
 Os três `Dockerfile.{api,durtguardian,durtscope}` foram validados localmente (`docker build -f Dockerfile.api .`, `docker build -f Dockerfile.durtguardian .`, `docker build -f Dockerfile.durtscope .`, todos a partir da raiz) - suba `durtone-durtguardian` com o binário real do Prowler instalado na imagem antes de contar com scans de CSPM de verdade em produção (a imagem atual não instala Python/Prowler). Os `fly.toml` não foram validados contra uma conta Fly real (`flyctl` não está disponível neste ambiente) - rode `fly config validate` antes do primeiro deploy.
 
 **Não use a UI "Launch an App from GitHub" do Fly para `durtone-api`/`durtone-durtguardian`/`durtone-durtscope`** - ela roda `flyctl launch plan propose` por trás, um subcomando que só sabe detectar um arquivo literalmente chamado `Dockerfile` na raiz (ou um runtime por heurística tipo `go.mod`/`package.json` com `main`); ele não aceita `--dockerfile` nem lê o `[build] dockerfile` de um `fly.toml` custom. Como os Dockerfiles deste repo se chamam `Dockerfile.api` etc. (não dá pra ter 3 arquivos chamados só `Dockerfile` na mesma pasta), essa UI sempre vai falhar com "Could not find a Dockerfile, nor detect a runtime or framework" pra esses três - não é um erro de configuração, é uma limitação da própria feature pra esse layout de monorepo.

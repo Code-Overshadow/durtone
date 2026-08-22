@@ -20,4 +20,4 @@ jobs:
       - run: flyctl deploy --remote-only
         working-directory: apps/durtwall
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_DEPLOY_TOKEN_DURTWALL }}

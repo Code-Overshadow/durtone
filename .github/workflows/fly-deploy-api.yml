@@ -21,9 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@v1
-      # FLY_API_TOKEN aqui é um secret do GitHub Actions (só existe durante o CI, pra
-      # autenticar o flyctl) - não tem relação com o FLY_API_TOKEN que é secret de runtime
-      # do próprio app durtone-api (usado por flyCerts.ts pra emitir certificados).
+      # FLY_API_TOKEN e o nome de env var que o flyctl exige pra se autenticar - o valor vem
+      # do secret FLY_DEPLOY_TOKEN_API do GitHub (token de deploy escopado a este app), sem
+      # relacao com o FLY_API_TOKEN que e secret de runtime do proprio durtone-api (usado por
+      # flyCerts.ts pra emitir certificados).
       - run: flyctl deploy --config fly.api.toml --remote-only
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_DEPLOY_TOKEN_API }}
