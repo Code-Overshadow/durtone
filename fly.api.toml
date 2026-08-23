@@ -10,6 +10,7 @@ primary_region = 'gru'
   dockerfile = 'Dockerfile.api'
 
 [env]
+  DASHBOARD_ORIGIN = 'https://durtone-dashboard.vercel.app'
   DURTONE_AUTH_REQUIRED = 'true'
   NODE_ENV = 'production'
   PORT = '3000'
