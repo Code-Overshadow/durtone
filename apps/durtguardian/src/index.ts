@@ -1,20 +1,19 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { decryptSecret } from '@durtone/crypto';
-import { buildProwlerCommand, cleanupCredentialEnv, compareWithBaseline, computeBaselineHash, credentialEnv, summarizeFindings, type ScanSnapshot } from './cspm';
+import { buildProwlerCommand, cleanupCredentialEnv, compareWithBaseline, computeBaselineHash, credentialEnv, parseOcsfFindings, summarizeFindings, type ScanSnapshot } from './cspm';
 import { getLatestScan, listDueCloudAccounts, persistScan, touchCloudAccountScan, updateCloudAccountHealth, upsertWorkerHeartbeat, type DueCloudAccount } from './storage';
 
 const DEFAULT_INTERVAL_MS = Number(process.env.DURTGUARDIAN_INTERVAL_MS ?? 5 * 60 * 1000);
 // How long a cloud account can go unscanned before it's picked up again. Defaults to the tick
 // interval itself - one deliberately simple cadence instead of separate 5min/1h schedules.
 const STALE_MS = Number(process.env.DURTGUARDIAN_STALE_MS ?? DEFAULT_INTERVAL_MS);
-
-function parseProwlerJson(raw: string, provider: string, accountId: string): ScanSnapshot {
-  const parsed = JSON.parse(raw);
-  const findings = Array.isArray(parsed) ? parsed : Array.isArray(parsed.findings) ? parsed.findings : [];
-  return { provider, accountId, timestamp: new Date().toISOString(), findings };
-}
+const OUTPUT_FILENAME = 'durtguardian-scan';
 
 async function runProwlerScan(provider: string, accountId: string, decryptedCredential: string): Promise<ScanSnapshot> {
-  const command = buildProwlerCommand({ provider, accountId, mode: 'baseline' });
+  const outputDir = mkdtempSync(join(tmpdir(), 'durtguardian-'));
+  const command = buildProwlerCommand({ provider, accountId, outputDirectory: outputDir, outputFilename: OUTPUT_FILENAME });
   const credentialEnvVars = credentialEnv(provider, decryptedCredential);
   try {
     const child = Bun.spawn({
@@ -24,21 +23,35 @@ async function runProwlerScan(provider: string, accountId: string, decryptedCred
       env: { ...process.env, ...credentialEnvVars },
     });
 
-    const stdout = await new Response(child.stdout).text();
     const stderr = await new Response(child.stderr).text();
     const exitCode = await child.exited;
 
-    if (exitCode !== 0) {
+    // Prowler's own exit code 3 means "scan completed, some checks failed" - that's the whole
+    // point of a CSPM scan (we WANT to see the failures), not an actual tool error. Only treat
+    // other non-zero codes (auth failure, invalid args, crash) as a real scan failure.
+    if (exitCode !== 0 && exitCode !== 3) {
       throw new Error(stderr || `prowler exited with code ${exitCode}`);
     }
 
+    // Prowler only writes the output file when there's at least one finding (see
+    // OCSF.transform/batch_write_data_to_file - `if not findings: return` and `and self._data`
+    // both skip writing anything for a clean/empty scan) - a missing file here means zero
+    // findings, not a failure, since we already threw above on a real non-zero/non-3 exit.
+    const outputPath = join(outputDir, `${OUTPUT_FILENAME}.ocsf.json`);
+    let raw = '[]';
     try {
-      return parseProwlerJson(stdout, provider, accountId);
+      raw = readFileSync(outputPath, 'utf8');
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'ENOENT') throw new Error(`unable to read Prowler output: ${String(error)}`);
+    }
+    try {
+      return { provider, accountId, timestamp: new Date().toISOString(), findings: parseOcsfFindings(raw) };
     } catch (error) {
       throw new Error(`unable to parse Prowler output: ${String(error)}`);
     }
   } finally {
     cleanupCredentialEnv(credentialEnvVars);
+    rmSync(outputDir, { recursive: true, force: true });
   }
 }
 

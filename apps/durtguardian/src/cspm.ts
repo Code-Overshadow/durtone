@@ -41,26 +41,61 @@ export function computeBaselineHash(snapshot: ScanSnapshot) {
   ).toString();
 }
 
-export function buildProwlerCommand(options: { provider: string; accountId?: string; mode?: string }) {
+/**
+ * Prowler 5.x dropped the plain `json` output mode (--output-formats now only accepts
+ * csv/json-asff/json-ocsf/html/sarif) and `--quiet` no longer exists - confirmed by reading the
+ * installed CLI's own --help, not guessed. json-ocsf is the only structured, cross-provider JSON
+ * mode left, and it's always written to a FILE (never stdout) - see parseOcsfFindings below for
+ * where that file gets read back.
+ */
+export function buildProwlerCommand(options: { provider: string; accountId?: string; outputDirectory: string; outputFilename: string }) {
   const provider = options.provider ?? 'aws';
   const accountId = options.accountId ?? 'default';
   const command = ['prowler', provider];
 
+  // Confirmed against the installed CLI's own --help (per-provider flags, not guessed): AWS has
+  // no account/id flag at all - the account is whatever the credentials resolve to via STS, no
+  // way to target a different one. Azure/GCP flags are singular ("--subscription-id"/
+  // "--project-id", both nargs='+') - the plural "--azure-subscription-ids"/"--gcp-project-ids"
+  // this used before don't exist in Prowler 5.x and fail as "unrecognized arguments".
   if (provider === 'azure') {
-    command.push('--azure-subscription-ids', accountId);
+    // Azure has no default auth method - must be picked explicitly. credentialEnv sets
+    // AZURE_CLIENT_ID/SECRET/TENANT_ID (service principal via env vars), so --sp-env-auth is the
+    // one that matches; without it Prowler exits with AzureNoAuthenticationMethodError.
+    command.push('--sp-env-auth', '--subscription-id', accountId);
   } else if (provider === 'gcp') {
-    command.push('--gcp-project-ids', accountId);
-  } else {
-    command.push('--account-id', accountId);
+    command.push('--project-id', accountId);
   }
 
-  command.push('--output-formats', 'json');
-
-  if (options.mode === 'baseline') {
-    command.push('--quiet');
-  }
+  command.push('--output-formats', 'json-ocsf');
+  command.push('--output-filename', options.outputFilename);
+  command.push('--output-directory', options.outputDirectory);
+  command.push('--only-logs');
 
   return command;
+}
+
+/** OCSF (Open Cybersecurity Schema Framework) shape Prowler 5.x's json-ocsf mode writes - only
+ * the fields we actually need, straight from prowler/lib/outputs/ocsf/ocsf.py's own transform:
+ * `status_code` carries the original PASS/FAIL/MANUAL string (status_id is a generic OCSF review
+ * workflow enum, NOT pass/fail), `severity` is already the plain capitalized string. */
+type OcsfFinding = {
+  status_code?: string;
+  severity?: string;
+  resources?: Array<{ uid?: string; name?: string }>;
+  metadata?: { event_code?: string };
+  finding_info?: { uid?: string };
+};
+
+export function parseOcsfFindings(raw: string): ProwlerFinding[] {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return (parsed as OcsfFinding[]).map((item) => ({
+    id: item.metadata?.event_code ?? item.finding_info?.uid ?? 'unknown',
+    resource: item.resources?.[0]?.uid ?? item.resources?.[0]?.name ?? 'unknown-resource',
+    status: item.status_code ?? 'UNKNOWN',
+    severity: item.severity ?? 'unknown',
+  }));
 }
 
 export type CloudCredential = {

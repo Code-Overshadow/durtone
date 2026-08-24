@@ -4,24 +4,56 @@ import {
   compareWithBaseline,
   computeBaselineHash,
   credentialEnv,
+  parseOcsfFindings,
   summarizeFindings,
 } from './cspm';
 
-test('buildProwlerCommand includes provider and output format', () => {
-  const command = buildProwlerCommand({ provider: 'aws', accountId: '123456789012' });
+test('buildProwlerCommand includes provider and the json-ocsf output mode', () => {
+  // AWS has no account/id flag at all in Prowler 5.x - the account comes from whichever
+  // credentials are in the environment (resolved via STS), confirmed against the installed
+  // CLI's own --help.
+  const command = buildProwlerCommand({ provider: 'aws', accountId: '123456789012', outputDirectory: '/tmp/scan', outputFilename: 'out' });
 
-  expect(command[0]).toBe('prowler');
-  expect(command[1]).toBe('aws');
-  expect(command.includes('--account-id')).toBe(true);
-  expect(command.includes('--output-formats')).toBe(true);
+  expect(command).toEqual(['prowler', 'aws', '--output-formats', 'json-ocsf', '--output-filename', 'out', '--output-directory', '/tmp/scan', '--only-logs']);
+  // Prowler 5.x dropped the plain "json" mode - only json-ocsf/json-asff/csv/html/sarif remain,
+  // and none of them write to stdout, only to a file (--output-directory/--output-filename).
+  expect(command.includes('--quiet')).toBe(false);
 });
 
 test('buildProwlerCommand maps Azure and GCP to their own account flags', () => {
-  const azure = buildProwlerCommand({ provider: 'azure', accountId: 'sub-123' });
-  expect(azure).toEqual(['prowler', 'azure', '--azure-subscription-ids', 'sub-123', '--output-formats', 'json']);
+  const azure = buildProwlerCommand({ provider: 'azure', accountId: 'sub-123', outputDirectory: '/tmp/scan', outputFilename: 'out' });
+  expect(azure).toEqual(['prowler', 'azure', '--sp-env-auth', '--subscription-id', 'sub-123', '--output-formats', 'json-ocsf', '--output-filename', 'out', '--output-directory', '/tmp/scan', '--only-logs']);
 
-  const gcp = buildProwlerCommand({ provider: 'gcp', accountId: 'project-123' });
-  expect(gcp).toEqual(['prowler', 'gcp', '--gcp-project-ids', 'project-123', '--output-formats', 'json']);
+  const gcp = buildProwlerCommand({ provider: 'gcp', accountId: 'project-123', outputDirectory: '/tmp/scan', outputFilename: 'out' });
+  expect(gcp).toEqual(['prowler', 'gcp', '--project-id', 'project-123', '--output-formats', 'json-ocsf', '--output-filename', 'out', '--output-directory', '/tmp/scan', '--only-logs']);
+});
+
+test('parseOcsfFindings maps the OCSF detection-finding shape to our flat ProwlerFinding', () => {
+  const ocsf = JSON.stringify([
+    {
+      status_code: 'FAIL',
+      severity: 'High',
+      resources: [{ uid: 'arn:aws:s3:::bucket-a' }],
+      metadata: { event_code: 'check-1' },
+    },
+    {
+      status_code: 'PASS',
+      severity: 'Low',
+      resources: [{ name: 'i-123' }],
+      finding_info: { uid: 'check-2' },
+    },
+  ]);
+
+  const findings = parseOcsfFindings(ocsf);
+  expect(findings).toEqual([
+    { id: 'check-1', resource: 'arn:aws:s3:::bucket-a', status: 'FAIL', severity: 'High' },
+    { id: 'check-2', resource: 'i-123', status: 'PASS', severity: 'Low' },
+  ]);
+});
+
+test('parseOcsfFindings returns an empty list for a non-array payload', () => {
+  expect(parseOcsfFindings('{}')).toEqual([]);
+  expect(parseOcsfFindings('[]')).toEqual([]);
 });
 
 test('credentialEnv maps decrypted credentials to provider-specific env vars', () => {
