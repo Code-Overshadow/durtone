@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -79,7 +80,7 @@ func TestPollRoutingTableOnceAppliesTheFleetResponse(t *testing.T) {
 	defer server.close()
 	server.config.ControlPlaneURL = controlPlane.URL
 
-	server.pollRoutingTableOnce(&http.Client{Timeout: 2 * time.Second})
+	server.pollRoutingTableOnce(context.Background(), &http.Client{Timeout: 2 * time.Second})
 
 	if receivedAuth != "Bearer fleet-secret" {
 		t.Fatalf("expected the fleet token to be sent, got %q", receivedAuth)

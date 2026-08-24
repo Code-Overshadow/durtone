@@ -704,11 +704,15 @@ export type PersistedCloudAccount = {
   displayName: string;
   regions: string[];
   enabled: boolean;
+  status: string;
+  lastCheckedAt: string | null;
+  lastError: string | null;
   lastScanAt: string | null;
   createdAt: string;
 };
 
 const CLOUD_ACCOUNT_COLUMNS = `id, provider, account_id as "accountId", display_name as "displayName", regions, enabled,
+      status, last_checked_at as "lastCheckedAt", last_error as "lastError",
       last_scan_at as "lastScanAt", created_at as "createdAt"`;
 
 export async function listCloudAccounts(tenantId: string): Promise<PersistedCloudAccount[] | undefined> {
@@ -758,6 +762,28 @@ export async function deleteCloudAccount(tenantId: string, id: string): Promise<
   return result.count > 0;
 }
 
+export type CloudAccountCredential = { provider: string; accountId: string; credentialRef: string };
+
+export async function getCloudAccountCredential(tenantId: string, id: string): Promise<CloudAccountCredential | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<CloudAccountCredential[]>`
+    select provider, account_id as "accountId", credential_ref as "credentialRef"
+    from cloud_accounts where tenant_id = ${tenantId} and id = ${id}
+  `;
+  return row;
+}
+
+export async function updateCloudAccountHealth(tenantId: string, id: string, health: { status: 'healthy' | 'error'; lastError?: string }): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`
+    update cloud_accounts set status = ${health.status}, last_checked_at = now(), last_error = ${health.lastError ?? null}, updated_at = now()
+    where tenant_id = ${tenantId} and id = ${id}
+  `;
+  return result.count > 0;
+}
+
 export type PersistedIdentityProvider = {
   id: string;
   kind: string;
@@ -767,29 +793,35 @@ export type PersistedIdentityProvider = {
   region: string | null;
   clientId: string | null;
   enabled: boolean;
+  status: string;
+  lastCheckedAt: string | null;
+  lastError: string | null;
   lastSyncAt: string | null;
   createdAt: string;
 };
 
+const IDENTITY_PROVIDER_COLUMNS = `id, kind, display_name as "displayName", base_url as "baseUrl", realm_or_tenant as "realmOrTenant",
+      region, client_id as "clientId", enabled, status, last_checked_at as "lastCheckedAt", last_error as "lastError",
+      last_sync_at as "lastSyncAt", created_at as "createdAt"`;
+
 export async function listIdentityProviders(tenantId: string): Promise<PersistedIdentityProvider[] | undefined> {
   const client = database();
   if (!client) return undefined;
-  return client<PersistedIdentityProvider[]>`
-    select id, kind, display_name as "displayName", base_url as "baseUrl", realm_or_tenant as "realmOrTenant",
-      region, client_id as "clientId", enabled, last_sync_at as "lastSyncAt", created_at as "createdAt"
-    from identity_providers where tenant_id = ${tenantId} order by created_at asc
-  `;
+  return client.unsafe<PersistedIdentityProvider[]>(
+    `select ${IDENTITY_PROVIDER_COLUMNS} from identity_providers where tenant_id = $1 order by created_at asc`,
+    [tenantId],
+  );
 }
 
 export async function insertIdentityProvider(tenantId: string, input: { kind: string; displayName: string; baseUrl?: string; realmOrTenant?: string; region?: string; clientId?: string; credentialRef: string }): Promise<PersistedIdentityProvider | undefined> {
   const client = database();
   if (!client) return undefined;
-  const [row] = await client<PersistedIdentityProvider[]>`
-    insert into identity_providers (tenant_id, kind, display_name, base_url, realm_or_tenant, region, client_id, credential_ref)
-    values (${tenantId}, ${input.kind}, ${input.displayName}, ${input.baseUrl ?? null}, ${input.realmOrTenant ?? null}, ${input.region ?? null}, ${input.clientId ?? null}, ${input.credentialRef})
-    returning id, kind, display_name as "displayName", base_url as "baseUrl", realm_or_tenant as "realmOrTenant",
-      region, client_id as "clientId", enabled, last_sync_at as "lastSyncAt", created_at as "createdAt"
-  `;
+  const [row] = await client.unsafe<PersistedIdentityProvider[]>(
+    `insert into identity_providers (tenant_id, kind, display_name, base_url, realm_or_tenant, region, client_id, credential_ref)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     returning ${IDENTITY_PROVIDER_COLUMNS}`,
+    [tenantId, input.kind, input.displayName, input.baseUrl ?? null, input.realmOrTenant ?? null, input.region ?? null, input.clientId ?? null, input.credentialRef],
+  );
   return row;
 }
 
@@ -821,6 +853,65 @@ export async function deleteIdentityProvider(tenantId: string, id: string): Prom
   if (!client) return false;
   const result = await client`delete from identity_providers where tenant_id = ${tenantId} and id = ${id}`;
   return result.count > 0;
+}
+
+export type IdentityProviderCredential = {
+  kind: string;
+  baseUrl: string | null;
+  realmOrTenant: string | null;
+  region: string | null;
+  clientId: string | null;
+  credentialRef: string;
+};
+
+export async function getIdentityProviderCredential(tenantId: string, id: string): Promise<IdentityProviderCredential | undefined> {
+  const client = database();
+  if (!client) return undefined;
+  const [row] = await client<IdentityProviderCredential[]>`
+    select kind, base_url as "baseUrl", realm_or_tenant as "realmOrTenant", region, client_id as "clientId", credential_ref as "credentialRef"
+    from identity_providers where tenant_id = ${tenantId} and id = ${id}
+  `;
+  return row;
+}
+
+export async function updateIdentityProviderHealth(tenantId: string, id: string, health: { status: 'healthy' | 'error'; lastError?: string }): Promise<boolean> {
+  const client = database();
+  if (!client) return false;
+  const result = await client`
+    update identity_providers set status = ${health.status}, last_checked_at = now(), last_error = ${health.lastError ?? null}, updated_at = now()
+    where tenant_id = ${tenantId} and id = ${id}
+  `;
+  return result.count > 0;
+}
+
+export type WorkerHeartbeat = {
+  service: string;
+  status: string;
+  detail: Record<string, unknown>;
+  lastError: string | null;
+  updatedAt: string;
+};
+
+export async function upsertWorkerHeartbeat(service: string, heartbeat: { status: 'healthy' | 'unhealthy'; detail?: Record<string, unknown>; lastError?: string }): Promise<void> {
+  const client = database();
+  if (!client) return;
+  await client`
+    insert into worker_heartbeats (service, status, detail, last_error, updated_at)
+    values (${service}, ${heartbeat.status}, ${JSON.stringify(heartbeat.detail ?? {})}::jsonb, ${heartbeat.lastError ?? null}, now())
+    on conflict (service) do update set
+      status = excluded.status,
+      detail = excluded.detail,
+      last_error = excluded.last_error,
+      updated_at = now()
+  `;
+}
+
+export async function listWorkerHeartbeats(): Promise<WorkerHeartbeat[]> {
+  const client = database();
+  if (!client) return [];
+  return client<WorkerHeartbeat[]>`
+    select service, status, detail, last_error as "lastError", updated_at as "updatedAt" from worker_heartbeats
+  `;
 }
 
 /**

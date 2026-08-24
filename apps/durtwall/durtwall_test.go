@@ -195,6 +195,8 @@ func (fakeHoneypotManager) Respond(_ context.Context, _ *tenantRoute, _ *http.Re
 
 func (fakeHoneypotManager) Close() {}
 
+func (fakeHoneypotManager) Healthy(context.Context) bool { return true }
+
 func TestHoneypotStrategyIsSwappable(t *testing.T) {
 	server, err := newServer(defaultConfig())
 	if err != nil {

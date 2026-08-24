@@ -5,6 +5,8 @@
   "scripts": {
     "db:up": "docker compose up -d",
     "db:down": "docker compose down",
+    "docker:local": "docker compose -f docker-compose.local.yml --env-file .env.docker up --build",
+    "docker:local:down": "docker compose -f docker-compose.local.yml --env-file .env.docker down",
     "dev": "concurrently -n api,dashboard -c blue,green \"bun run --filter api dev\" \"bun run --filter dashboard dev\"",
     "dev:all": "concurrently -n api,dashboard,durtguardian,durtscope -c blue,green,yellow,magenta \"bun run --filter api dev\" \"bun run --filter dashboard dev\" \"bun run --filter durtguardian dev\" \"bun run --filter durtscope dev\"",
     "check": "bun run --filter '*' check",

@@ -90,13 +90,14 @@ type tenantRoute struct {
 type routingTable map[string]*tenantRoute
 
 type proxyServer struct {
-	config   Config
-	routes   atomic.Pointer[routingTable]
-	limiter  *tokenBucketLimiter
-	waf      *wafEngine
-	logger   *requestLogger
-	honeypot honeypotStrategy
-	stopPoll context.CancelFunc
+	config       Config
+	routes       atomic.Pointer[routingTable]
+	limiter      *tokenBucketLimiter
+	waf          *wafEngine
+	logger       *requestLogger
+	honeypot     honeypotStrategy
+	honeypotMode string
+	stopPoll     context.CancelFunc
 }
 
 func (server *proxyServer) close() {
@@ -120,6 +121,7 @@ func newServer(config Config) (*proxyServer, error) {
 	// multi-tenant fleet. config.Honeypot opts into the isolated Docker-backed one instead, which
 	// needs a local Docker daemon (standalone/local use only) but is a more convincing decoy since
 	// it's a real, if shared, environment rather than a fabricated response.
+	honeypotMode := "synthetic"
 	var honeypot honeypotStrategy = newSyntheticHoneypot()
 	if config.Honeypot {
 		docker, err := newDockerHoneypotManager(config)
@@ -127,8 +129,9 @@ func newServer(config Config) (*proxyServer, error) {
 			return nil, fmt.Errorf("create honeypot manager: %w", err)
 		}
 		honeypot = docker
+		honeypotMode = "docker"
 	}
-	server := &proxyServer{config: config, limiter: newTokenBucketLimiter(config.RateLimit, config.RateBurst), waf: waf, logger: logger, honeypot: honeypot}
+	server := &proxyServer{config: config, limiter: newTokenBucketLimiter(config.RateLimit, config.RateBurst), waf: waf, logger: logger, honeypot: honeypot, honeypotMode: honeypotMode}
 	empty := routingTable{}
 	server.routes.Store(&empty)
 	server.startRoutingPoll()

@@ -1,13 +1,14 @@
 import { Elysia } from 'elysia';
 import { createHash, randomBytes } from 'node:crypto';
 import { decryptSecret, encryptSecret } from '@durtone/crypto';
-import { buildIdentityProviderConfig, revokeIdentity } from '@durtone/identity-providers';
+import { buildIdentityProviderConfig, revokeIdentity, testConnection as testIdentityProviderConnection } from '@durtone/identity-providers';
+import { testCloudAccountConnection } from '@durtone/cloud-providers';
 import { getDiscoveryStats, ingestLogs, listEndpoints, listRequestLogs, replaceOpenApi } from './discovery';
 import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
 import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
-import { deleteCloudAccount, deleteDomain, deleteIdentityProvider, deleteInvitation, deleteTenantMembership, ensureUserProfile, findInvitationByToken, generateUniqueTenantSlug, getDomain, getIdentityForRevoke, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, getTenant, insertCloudAccount, insertDomain, insertIdentityProvider, insertInvitation, insertMembership, insertTenant, listActiveRoutes, listCloudAccounts, listCorrelations, listDomains, listIdentityProviders, listInvitations, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, listTenantMembers, listUserMemberships, markInvitationAccepted, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateCloudAccount, updateDomainStatus, updateIdentityProvider, updateIdentityStatus, updateTenantMembershipRole, updateTenantName, updateTenantSettings, type PersistedScan } from './storage';
+import { deleteCloudAccount, deleteDomain, deleteIdentityProvider, deleteInvitation, deleteTenantMembership, ensureUserProfile, findInvitationByToken, generateUniqueTenantSlug, getCloudAccountCredential, getDomain, getIdentityForRevoke, getIdentityProviderCredential, getPersistedConfig, getPersistedCspmSummary, getPersistedDiscoveryStats, getPersistedIdentityHygiene, getTenant, insertCloudAccount, insertDomain, insertIdentityProvider, insertInvitation, insertMembership, insertTenant, listActiveRoutes, listCloudAccounts, listCorrelations, listDomains, listIdentityProviders, listInvitations, listPendingDomains, listPersistedEndpoints, listPersistedIdentities, listPersistedLogs, listTenantMembers, listUserMemberships, listWorkerHeartbeats, markInvitationAccepted, persistConfig, persistEndpoints, persistLogs, persistScan, recordAuditLog, recordObservedEndpoint, updateCloudAccount, updateCloudAccountHealth, updateDomainStatus, updateIdentityProvider, updateIdentityProviderHealth, updateIdentityStatus, updateTenantMembershipRole, updateTenantName, updateTenantSettings, upsertWorkerHeartbeat, type PersistedScan } from './storage';
 import { correlateGuardianChange, correlateWafAttack, type CspmChange, type WafAttack } from './correlation';
 import { onEvent, publishEvent } from './eventBus';
 import { buildExecutiveReport } from './report';
@@ -170,6 +171,24 @@ const app = new Elysia()
       return { error: fleet.error };
     }
     return { routes: await listActiveRoutes() };
+  })
+  .post('/api/v1/edge/heartbeat', async ({ body, request, set }) => {
+    const fleet = await requireFleet(request);
+    if (!fleet.ok) {
+      set.status = fleet.status;
+      return { error: fleet.error };
+    }
+    const input = body as { routesApplied?: unknown; honeypotMode?: unknown; honeypotHealthy?: unknown };
+    const honeypotHealthy = input.honeypotHealthy !== false;
+    await upsertWorkerHeartbeat('durtwall', {
+      status: honeypotHealthy ? 'healthy' : 'unhealthy',
+      detail: {
+        routesApplied: typeof input.routesApplied === 'number' ? input.routesApplied : 0,
+        honeypotMode: typeof input.honeypotMode === 'string' ? input.honeypotMode : 'unknown',
+        honeypotHealthy,
+      },
+    });
+    return { ok: true };
   })
   .post('/api/v1/openapi', ({ body, set }) => {
     try {
@@ -750,6 +769,29 @@ const app = new Elysia()
     }
     return { deleted: true };
   })
+  .post('/api/v1/cloud-accounts/:id/test', async ({ params, request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const account = await getCloudAccountCredential(tenant.tenantId, params.id);
+    if (!account) {
+      set.status = 404;
+      return { error: 'cloud account not found' };
+    }
+    try {
+      const credential = JSON.parse(decryptSecret(account.credentialRef));
+      await testCloudAccountConnection(account.provider as 'aws' | 'azure' | 'gcp', credential, account.accountId);
+      await updateCloudAccountHealth(tenant.tenantId, params.id, { status: 'healthy' });
+      return { status: 'healthy' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'connection test failed';
+      await updateCloudAccountHealth(tenant.tenantId, params.id, { status: 'error', lastError: message });
+      set.status = 502;
+      return { status: 'error', error: message };
+    }
+  })
   .get('/api/v1/identity-providers', async ({ request, set }) => {
     const tenant = await requireTenant(request);
     if (!tenant.ok) {
@@ -845,6 +887,54 @@ const app = new Elysia()
       return { error: 'identity provider not found' };
     }
     return { deleted: true };
+  })
+  .post('/api/v1/identity-providers/:id/test', async ({ params, request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const row = await getIdentityProviderCredential(tenant.tenantId, params.id);
+    if (!row) {
+      set.status = 404;
+      return { error: 'identity provider not found' };
+    }
+    try {
+      const decrypted = decryptSecret(row.credentialRef);
+      const config = buildIdentityProviderConfig(row, decrypted);
+      await testIdentityProviderConnection(config);
+      await updateIdentityProviderHealth(tenant.tenantId, params.id, { status: 'healthy' });
+      return { status: 'healthy' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'connection test failed';
+      await updateIdentityProviderHealth(tenant.tenantId, params.id, { status: 'error', lastError: message });
+      set.status = 502;
+      return { status: 'error', error: message };
+    }
+  })
+  .get('/api/v1/services/health', async ({ request, set }) => {
+    const tenant = await requireTenant(request);
+    if (!tenant.ok) {
+      set.status = tenant.status;
+      return { error: tenant.error };
+    }
+    const [heartbeats, cloudAccounts, identityProviders] = await Promise.all([
+      listWorkerHeartbeats(),
+      listCloudAccounts(tenant.tenantId),
+      listIdentityProviders(tenant.tenantId),
+    ]);
+    const STALE_HEARTBEAT_MS = 30_000;
+    const heartbeatFor = (service: string) => {
+      const row = heartbeats.find((entry) => entry.service === service);
+      if (!row) return { status: 'unknown' as const, detail: {}, lastError: null, updatedAt: null };
+      const stale = Date.now() - Date.parse(row.updatedAt) > STALE_HEARTBEAT_MS;
+      return { status: stale ? ('unknown' as const) : (row.status as 'healthy' | 'unhealthy'), detail: row.detail, lastError: row.lastError, updatedAt: row.updatedAt };
+    };
+    return {
+      durtwall: heartbeatFor('durtwall'),
+      durtguardian: { ...heartbeatFor('durtguardian'), accounts: cloudAccounts ?? [] },
+      durtscope: { ...heartbeatFor('durtscope'), providers: identityProviders ?? [] },
+    };
   })
   .post('/api/v1/honeytokens/callback', ({ body, set }) => {
     try {

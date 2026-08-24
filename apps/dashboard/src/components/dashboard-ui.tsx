@@ -31,6 +31,17 @@ export function SectionHeading({ kicker, title, description, count, actions }: {
   </div>;
 }
 
+const STATUS_TAG_LABEL: Record<string, string> = {
+  healthy: "Saudável",
+  unhealthy: "Falhando",
+  pending: "Verificando…",
+  unknown: "Sem dados ainda",
+};
+
+export function StatusTag({ status, title }: { status: "healthy" | "unhealthy" | "pending" | "unknown"; title?: string }) {
+  return <span className={`status-tag ${status}`} title={title}>{STATUS_TAG_LABEL[status]}</span>;
+}
+
 export function RefreshButton({ loading }: { loading: boolean }) {
   return <button className="icon-button" onClick={requestRefresh} disabled={loading} aria-label="Atualizar dados">
     <RefreshCw size={17} className={loading ? "spin" : ""} />

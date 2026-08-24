@@ -4,6 +4,13 @@
 FROM oven/bun:1 AS runtime
 WORKDIR /repo
 
+# Prowler (CLI Python) e' o motor real dos scans de CSPM (ver apps/durtguardian/src/cspm.ts) -
+# sem isso o worker sobe mas todo scan falha. oven/bun:1 e' Debian-based.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates \
+  && pip install --no-cache-dir --break-system-packages prowler \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 RUN bun install --frozen-lockfile --production
 

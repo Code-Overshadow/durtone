@@ -1,0 +1,116 @@
+# Stack local completa - roda os MESMOS Dockerfiles usados no deploy real (Fly.io), pra validar
+# tudo antes de tocar em produção. Uso:
+#   1. cp .env.docker.example .env.docker  (preenche com as credenciais reais do Supabase)
+#   2. bun run docker:local
+#
+# Postgres e Redis sao locais e isolados (nao a Supabase de producao) - so a autenticacao usa o
+# Supabase real (nao existe um jeito de simular Supabase Auth localmente), os dados de tenants,
+# configs, cloud accounts etc. ficam inteiramente neste Postgres local.
+#
+# `name:` explicito e obrigatorio aqui - sem ele o Compose usa o nome do diretorio como projeto,
+# o MESMO que o docker-compose.yml da raiz (bun run db:up) usa por padrao, e os dois arquivos
+# acabam disputando o mesmo "slot" de serviço "postgres"/"redis" (ja aconteceu: subir esta stack
+# recriou o container durtone-postgres-dev da stack de dev direto, por coincidencia de nome de
+# projeto - name: aqui isola completamente os dois.
+name: durtone-local
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: durtone_dev_password
+      POSTGRES_DB: durtone
+    ports:
+      # 55433, nao 55432 - evita colidir com a stack de dev direto (bun run db:up), que usa
+      # exatamente essa porta e pode estar rodando ao mesmo tempo.
+      - "55433:5432"
+    volumes:
+      - durtone-local-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "56380:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "3000"
+      NODE_ENV: "production"
+      DURTONE_AUTH_REQUIRED: "true"
+      DASHBOARD_ORIGIN: "http://localhost:3001"
+      DATABASE_URL: "postgresql://postgres:durtone_dev_password@postgres:5432/durtone"
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      CREDENTIAL_ENCRYPTION_KEY: "it/aTIaBbTtLR8OdC0+1eFNI6lz1FnlUkHUqUXJD1GQ="
+      EDGE_FLEET_TOKEN: "Vgtwso9PUPucKViB9V/LPTQGGVzpGNsrTb94Aa6zgsY="
+    ports:
+      - "3000:3000"
+
+  durtguardian:
+    build:
+      context: .
+      dockerfile: Dockerfile.durtguardian
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      DATABASE_URL: "postgresql://postgres:durtone_dev_password@postgres:5432/durtone"
+      CREDENTIAL_ENCRYPTION_KEY: "it/aTIaBbTtLR8OdC0+1eFNI6lz1FnlUkHUqUXJD1GQ="
+      DURTGUARDIAN_INTERVAL_MS: "60000"
+
+  durtscope:
+    build:
+      context: .
+      dockerfile: Dockerfile.durtscope
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: "production"
+      DATABASE_URL: "postgresql://postgres:durtone_dev_password@postgres:5432/durtone"
+      CREDENTIAL_ENCRYPTION_KEY: "it/aTIaBbTtLR8OdC0+1eFNI6lz1FnlUkHUqUXJD1GQ="
+      DURTSCOPE_INTERVAL_MS: "60000"
+
+  durtwall:
+    build:
+      context: apps/durtwall
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    environment:
+      PORT: "8080"
+      DURTWALL_CONTROL_PLANE_URL: "http://api:3000"
+      DURTWALL_FLEET_TOKEN: "Vgtwso9PUPucKViB9V/LPTQGGVzpGNsrTb94Aa6zgsY="
+    ports:
+      # host 18080, nao 8080 - porta 8080 pode ja estar em uso por outro processo local
+      - "18080:8080"
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_API_URL: "http://localhost:3000"
+        NEXT_PUBLIC_EDGE_HOSTNAME: "localhost:18080"
+    depends_on:
+      - api
+    ports:
+      - "3001:3001"
+
+volumes:
+  durtone-local-postgres:

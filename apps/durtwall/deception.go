@@ -103,6 +103,29 @@ func (manager *dockerHoneypotManager) Respond(ctx context.Context, _ *tenantRout
 	return statusWriter.status(), nil
 }
 
+// Healthy reports true if the honeypot container was never needed yet (no scanner traffic seen -
+// nothing to be broken), or if it's running and answering. Only reports false when a container
+// was started at some point and has since stopped responding.
+func (manager *dockerHoneypotManager) Healthy(ctx context.Context) bool {
+	manager.mu.Lock()
+	target := manager.url
+	manager.mu.Unlock()
+	if target == "" {
+		return true
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return false
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	defer response.Body.Close()
+	return response.StatusCode < http.StatusInternalServerError
+}
+
 func (manager *dockerHoneypotManager) Close() {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()

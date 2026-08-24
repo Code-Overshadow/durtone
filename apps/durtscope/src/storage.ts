@@ -67,6 +67,28 @@ export async function upsertIdentities(tenantId: string, providerId: string, ide
   }
 }
 
+export async function updateIdentityProviderHealth(id: string, health: { status: 'healthy' | 'error'; lastError?: string }) {
+  const client = database();
+  await client`
+    update identity_providers
+    set status = ${health.status}, last_checked_at = now(), last_error = ${health.lastError ?? null}, updated_at = now()
+    where id = ${id}
+  `;
+}
+
+export async function upsertWorkerHeartbeat(service: string, heartbeat: { status: 'healthy' | 'unhealthy'; detail?: Record<string, unknown>; lastError?: string }) {
+  const client = database();
+  await client`
+    insert into worker_heartbeats (service, status, detail, last_error, updated_at)
+    values (${service}, ${heartbeat.status}, ${JSON.stringify(heartbeat.detail ?? {})}::jsonb, ${heartbeat.lastError ?? null}, now())
+    on conflict (service) do update set
+      status = excluded.status,
+      detail = excluded.detail,
+      last_error = excluded.last_error,
+      updated_at = now()
+  `;
+}
+
 export async function closeStorage() {
   if (sql) await sql.end({ timeout: 1 });
   sql = undefined;

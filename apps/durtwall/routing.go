@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log"
@@ -48,18 +49,18 @@ func (server *proxyServer) routingPollLoop(ctx context.Context) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	ticker := time.NewTicker(routingPollInterval)
 	defer ticker.Stop()
-	server.pollRoutingTableOnce(client)
+	server.pollRoutingTableOnce(ctx, client)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			server.pollRoutingTableOnce(client)
+			server.pollRoutingTableOnce(ctx, client)
 		}
 	}
 }
 
-func (server *proxyServer) pollRoutingTableOnce(client *http.Client) {
+func (server *proxyServer) pollRoutingTableOnce(ctx context.Context, client *http.Client) {
 	request, err := http.NewRequest(http.MethodGet, server.config.ControlPlaneURL+"/api/v1/edge/routing-table", nil)
 	if err != nil {
 		return
@@ -80,13 +81,49 @@ func (server *proxyServer) pollRoutingTableOnce(client *http.Client) {
 		log.Printf("durtwall: routing table poll decode failed: %v", err)
 		return
 	}
-	server.applyRoutingTable(parsed.Routes)
+	routesApplied := server.applyRoutingTable(parsed.Routes)
+	server.sendHeartbeat(ctx, client, routesApplied)
+}
+
+type heartbeatPayload struct {
+	RoutesApplied   int    `json:"routesApplied"`
+	HoneypotMode    string `json:"honeypotMode"`
+	HoneypotHealthy bool   `json:"honeypotHealthy"`
+}
+
+// sendHeartbeat piggybacks on the same 15s cycle as the routing table poll - one fewer timer, and
+// it only makes sense to report "DurtWall is healthy" right after actually confirming it can talk
+// to the control plane. Reuses the same authenticated client/fleet token.
+func (server *proxyServer) sendHeartbeat(ctx context.Context, client *http.Client, routesApplied int) {
+	body, err := json.Marshal(heartbeatPayload{
+		RoutesApplied:   routesApplied,
+		HoneypotMode:    server.honeypotMode,
+		HoneypotHealthy: server.honeypot.Healthy(ctx),
+	})
+	if err != nil {
+		return
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.config.ControlPlaneURL+"/api/v1/edge/heartbeat", bytes.NewReader(body))
+	if err != nil {
+		return
+	}
+	request.Header.Set("Authorization", "Bearer "+server.config.FleetToken)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		log.Printf("durtwall: heartbeat failed: %v", err)
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		log.Printf("durtwall: heartbeat returned status %d", response.StatusCode)
+	}
 }
 
 // applyRoutingTable replaces the whole routing table on every poll rather than diffing against the
 // previous one - simpler, and rebuilding a handful of *httputil.ReverseProxy values every 15s is
 // cheap. Revisit with an actual diff if the tenant count ever makes that measurably expensive.
-func (server *proxyServer) applyRoutingTable(remoteRoutes []remoteRoute) {
+func (server *proxyServer) applyRoutingTable(remoteRoutes []remoteRoute) int {
 	table := routingTable{}
 	for _, remote := range remoteRoutes {
 		if remote.Hostname == "" || remote.TenantID == "" {
@@ -118,6 +155,7 @@ func (server *proxyServer) applyRoutingTable(remoteRoutes []remoteRoute) {
 	}
 	server.routes.Store(&table)
 	log.Printf("durtwall: applied routing table (%d routes)", len(table))
+	return len(table)
 }
 
 func boolSetting(settings map[string]interface{}, key string) bool {

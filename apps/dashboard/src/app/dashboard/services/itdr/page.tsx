@@ -6,10 +6,16 @@ import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
-import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
+import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink, StatusTag } from "@/components/dashboard-ui";
 
-type IdentityProvider = { id: string; kind: string; displayName: string; baseUrl: string | null; realmOrTenant: string | null; region: string | null; clientId: string | null; enabled: boolean };
+type IdentityProvider = { id: string; kind: string; displayName: string; baseUrl: string | null; realmOrTenant: string | null; region: string | null; clientId: string | null; enabled: boolean; status: "healthy" | "error" | "unknown"; lastError: string | null };
 type Kind = "keycloak" | "okta" | "aws" | "google";
+
+function healthTagStatus(provider: IdentityProvider): "healthy" | "unhealthy" | "unknown" {
+  if (provider.status === "healthy") return "healthy";
+  if (provider.status === "error") return "unhealthy";
+  return "unknown";
+}
 
 const emptyForm = { kind: "keycloak" as Kind, displayName: "", baseUrl: "", realmOrTenant: "", region: "us-east-1", clientId: "", clientSecret: "", apiToken: "", accessKeyId: "", secretAccessKey: "", accessToken: "" };
 
@@ -31,6 +37,7 @@ export default function ItdrSettingsPage() {
   const [form, setForm] = useState(emptyForm);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -72,6 +79,18 @@ export default function ItdrSettingsPage() {
     void providersResource.refresh();
   }
 
+  async function testConnection(id: string) {
+    setTestingId(id);
+    try {
+      await apiPost(`/api/v1/identity-providers/${id}/test`, {});
+    } catch {
+      // status/lastError já foram persistidos pela API mesmo em caso de falha - o refresh mostra o resultado
+    } finally {
+      setTestingId(null);
+      void providersResource.refresh();
+    }
+  }
+
   return <div className="content settings-content">
     <ServiceBackLink />
     <SectionHeading kicker="DURTSCOPE" title="Provedores de identidade" description="Conectores que o DurtScope consulta para inventariar identidades humanas e de serviço." />
@@ -99,8 +118,10 @@ export default function ItdrSettingsPage() {
     <div className="resource-list">
       {providers.length ? providers.map((provider) => <div className="resource-card" key={provider.id}>
         <div><strong><Users size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{provider.displayName}</strong><small>{KIND_LABEL[provider.kind] ?? provider.kind}{provider.realmOrTenant ? ` · ${provider.realmOrTenant}` : ""}</small></div>
+        <StatusTag status={healthTagStatus(provider)} title={provider.lastError ?? undefined} />
         <span className={provider.enabled ? "status-tag enabled" : "status-tag disabled"}>{provider.enabled ? "Ativo" : "Pausado"}</span>
         <div className="resource-actions">
+          <button className="ghost-button" onClick={() => void testConnection(provider.id)} disabled={testingId === provider.id}>{testingId === provider.id ? "Testando..." : "Testar conexão"}</button>
           <button className="ghost-button" onClick={() => void toggle(provider)}>{provider.enabled ? "Pausar" : "Reativar"}</button>
           <button className="danger-button" onClick={() => void remove(provider.id)}><Trash2 size={13} /> Remover</button>
         </div>

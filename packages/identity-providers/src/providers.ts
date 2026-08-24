@@ -2,6 +2,7 @@ import { DeleteAccessKeyCommand, IAMClient, ListAccessKeysCommand, ListRolesComm
 import { normalizeKeycloakUsers, type IdentityRecord } from './itdr';
 import {
   disableKeycloakUser,
+  getKeycloakToken,
   listKeycloakUserSessions,
   listKeycloakUsers,
   logoutKeycloakUser,
@@ -171,6 +172,45 @@ export async function collectProviderIdentities(config: IdentityProviderConfig):
       return listAwsIamIdentities(config);
     case 'google':
       return listGoogleWorkspaceIdentities(config);
+  }
+}
+
+/**
+ * Cheapest real call per provider that proves an identity_providers credential actually
+ * authenticates - reuses the same clients collectProviderIdentities uses, just the smallest
+ * possible request instead of a full listing.
+ */
+export async function testConnection(config: IdentityProviderConfig): Promise<void> {
+  switch (config.provider) {
+    case 'keycloak':
+      await getKeycloakToken(config);
+      return;
+    case 'okta':
+      await requestJson(`${config.baseUrl.replace(/\/$/, '')}/api/v1/users?limit=1`, {
+        headers: { Authorization: `SSWS ${config.apiToken}`, Accept: 'application/json' },
+      }, 'Okta connection test');
+      return;
+    case 'google': {
+      const baseUrl = config.baseUrl ?? 'https://admin.googleapis.com/admin/directory/v1';
+      await requestJson(
+        `${baseUrl.replace(/\/$/, '')}/users?customer=${encodeURIComponent(config.customer)}&maxResults=1`,
+        { headers: { Authorization: `Bearer ${config.accessToken}`, Accept: 'application/json' } },
+        'Google Workspace connection test',
+      );
+      return;
+    }
+    case 'aws': {
+      const client = new IAMClient({
+        region: config.region,
+        credentials: config.accessKeyId && config.secretAccessKey ? {
+          accessKeyId: config.accessKeyId,
+          secretAccessKey: config.secretAccessKey,
+          ...(config.sessionToken ? { sessionToken: config.sessionToken } : {}),
+        } : undefined,
+      });
+      await client.send(new ListUsersCommand({ MaxItems: 1 }));
+      return;
+    }
   }
 }
 

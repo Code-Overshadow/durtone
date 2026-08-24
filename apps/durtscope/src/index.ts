@@ -1,6 +1,6 @@
 import { decryptSecret } from '@durtone/crypto';
 import { buildIdentityProviderConfig, buildIdentityRisk, collectProviderIdentities } from '@durtone/identity-providers';
-import { listDueIdentityProviders, touchIdentityProviderSync, upsertIdentities, type DueIdentityProvider } from './storage';
+import { listDueIdentityProviders, touchIdentityProviderSync, updateIdentityProviderHealth, upsertIdentities, upsertWorkerHeartbeat, type DueIdentityProvider } from './storage';
 
 const DEFAULT_INTERVAL_MS = Number(process.env.DURTSCOPE_INTERVAL_MS ?? 5 * 60 * 1000);
 // How long a provider can go unsynced before it's picked up again. Same deliberate
@@ -23,6 +23,7 @@ async function syncProvider(row: DueIdentityProvider) {
     lastSeenAt: identity.lastSeen,
   })));
   await touchIdentityProviderSync(row.id);
+  await updateIdentityProviderHealth(row.id, { status: 'healthy' });
 
   console.log(JSON.stringify({
     status: 'sync-complete',
@@ -35,19 +36,30 @@ async function syncProvider(row: DueIdentityProvider) {
 
 export async function runCycle() {
   const due = await listDueIdentityProviders(STALE_MS);
+  let failed = 0;
   for (const row of due) {
     try {
       await syncProvider(row);
     } catch (error) {
+      failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
       console.error(JSON.stringify({
         status: 'sync-failed',
         tenantId: row.tenantId,
         provider: row.kind,
         displayName: row.displayName,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       }));
+      await updateIdentityProviderHealth(row.id, { status: 'error', lastError: message }).catch(() => {});
     }
   }
+
+  await upsertWorkerHeartbeat('durtscope', {
+    status: failed > 0 && failed === due.length && due.length > 0 ? 'unhealthy' : 'healthy',
+    detail: { providersSynced: due.length, providersFailed: failed },
+  }).catch((error) => {
+    console.error(JSON.stringify({ status: 'heartbeat-failed', error: error instanceof Error ? error.message : String(error) }));
+  });
 }
 
 if (import.meta.main) {

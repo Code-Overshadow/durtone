@@ -1,3 +1,7 @@
+import { writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 export type ProwlerFinding = {
   id?: string;
   check?: string;
@@ -66,12 +70,16 @@ export type CloudCredential = {
   clientId?: string;
   clientSecret?: string;
   tenantId?: string;
-  credentialsPath?: string;
+  serviceAccountJson?: string;
 };
 
 /**
  * Maps the decrypted `cloud_accounts.credential_ref` JSON blob to the env vars
- * each cloud provider's SDK (used internally by Prowler) expects.
+ * each cloud provider's SDK (used internally by Prowler) expects. For gcp, the service account
+ * JSON is stored inline (not a filesystem path - that never existed inside the container) and
+ * gets written to a fresh temp file here, since Prowler/google-auth only accept
+ * GOOGLE_APPLICATION_CREDENTIALS as a file path. Call cleanupCredentialEnv after the scan to
+ * remove it.
  */
 export function credentialEnv(provider: string, decrypted: string): Record<string, string> {
   let credential: CloudCredential;
@@ -89,13 +97,25 @@ export function credentialEnv(provider: string, decrypted: string): Record<strin
     };
   }
   if (provider === 'gcp') {
-    return { GOOGLE_APPLICATION_CREDENTIALS: credential.credentialsPath ?? '' };
+    const path = join(tmpdir(), `durtguardian-gcp-${Bun.hash(decrypted)}-${Date.now()}.json`);
+    writeFileSync(path, credential.serviceAccountJson ?? '{}', { mode: 0o600 });
+    return { GOOGLE_APPLICATION_CREDENTIALS: path };
   }
   return {
     AWS_ACCESS_KEY_ID: credential.accessKeyId ?? '',
     AWS_SECRET_ACCESS_KEY: credential.secretAccessKey ?? '',
     ...(credential.sessionToken ? { AWS_SESSION_TOKEN: credential.sessionToken } : {}),
   };
+}
+
+/** Removes the temp GOOGLE_APPLICATION_CREDENTIALS file credentialEnv wrote for a gcp scan, if any. */
+export function cleanupCredentialEnv(env: Record<string, string>) {
+  if (!env.GOOGLE_APPLICATION_CREDENTIALS) return;
+  try {
+    unlinkSync(env.GOOGLE_APPLICATION_CREDENTIALS);
+  } catch {
+    // best-effort cleanup
+  }
 }
 
 export function summarizeFindings(findings: ProwlerFinding[]) {

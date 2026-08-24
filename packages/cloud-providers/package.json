@@ -1,0 +1,10 @@
+{
+  "name": "@durtone/cloud-providers",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@aws-sdk/client-sts": "^3.1115.0"
+  }
+}

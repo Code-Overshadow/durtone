@@ -6,17 +6,23 @@ import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
-import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
+import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink, StatusTag } from "@/components/dashboard-ui";
 
-type CloudAccount = { id: string; provider: string; accountId: string; displayName: string; regions: string[]; enabled: boolean; lastScanAt: string | null };
+type CloudAccount = { id: string; provider: string; accountId: string; displayName: string; regions: string[]; enabled: boolean; status: "healthy" | "error" | "unknown"; lastCheckedAt: string | null; lastError: string | null; lastScanAt: string | null };
 type Provider = "aws" | "azure" | "gcp";
 
-const emptyForm = { provider: "aws" as Provider, accountId: "", displayName: "", regions: "", accessKeyId: "", secretAccessKey: "", clientId: "", clientSecret: "", tenantId: "", credentialsPath: "" };
+const emptyForm = { provider: "aws" as Provider, accountId: "", displayName: "", regions: "", accessKeyId: "", secretAccessKey: "", clientId: "", clientSecret: "", tenantId: "", serviceAccountJson: "" };
 
 function buildCredential(form: typeof emptyForm) {
   if (form.provider === "aws") return { accessKeyId: form.accessKeyId, secretAccessKey: form.secretAccessKey };
   if (form.provider === "azure") return { clientId: form.clientId, clientSecret: form.clientSecret, tenantId: form.tenantId };
-  return { credentialsPath: form.credentialsPath };
+  return { serviceAccountJson: form.serviceAccountJson };
+}
+
+function healthTagStatus(account: CloudAccount): "healthy" | "unhealthy" | "unknown" {
+  if (account.status === "healthy") return "healthy";
+  if (account.status === "error") return "unhealthy";
+  return "unknown";
 }
 
 export default function CspmSettingsPage() {
@@ -28,6 +34,7 @@ export default function CspmSettingsPage() {
   const [form, setForm] = useState(emptyForm);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [testingId, setTestingId] = useState<string | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -60,6 +67,18 @@ export default function CspmSettingsPage() {
     void accountsResource.refresh();
   }
 
+  async function testConnection(id: string) {
+    setTestingId(id);
+    try {
+      await apiPost(`/api/v1/cloud-accounts/${id}/test`, {});
+    } catch {
+      // status/lastError já foram persistidos pela API mesmo em caso de falha - o refresh mostra o resultado
+    } finally {
+      setTestingId(null);
+      void accountsResource.refresh();
+    }
+  }
+
   return <div className="content settings-content">
     <ServiceBackLink />
     <SectionHeading kicker="DURTGUARDIAN" title="Contas cloud" description="Credenciais que o DurtGuardian usa para varrer a postura CSPM de cada conta." />
@@ -83,7 +102,7 @@ export default function CspmSettingsPage() {
           <label>Client secret<input type="password" value={form.clientSecret} onChange={(event) => setForm({ ...form, clientSecret: event.target.value })} autoComplete="new-password" required /></label>
           <label>Tenant ID<input value={form.tenantId} onChange={(event) => setForm({ ...form, tenantId: event.target.value })} required /></label>
         </>}
-        {form.provider === "gcp" && <label>Caminho do service account JSON<input value={form.credentialsPath} onChange={(event) => setForm({ ...form, credentialsPath: event.target.value })} placeholder="/secrets/gcp-service-account.json" required /></label>}
+        {form.provider === "gcp" && <label>JSON da service account<textarea value={form.serviceAccountJson} onChange={(event) => setForm({ ...form, serviceAccountJson: event.target.value })} placeholder='{"type": "service_account", "client_email": "...", "private_key": "...", ...}' rows={4} required /></label>}
       </div>
       {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
       <div className="form-actions"><span className="muted">Credenciais são cifradas antes de persistir e nunca retornam nas respostas.</span><button className="primary-button" type="submit" disabled={busy}><Plus size={16} /> {busy ? "Cadastrando..." : "Adicionar conta"}</button></div>
@@ -91,8 +110,10 @@ export default function CspmSettingsPage() {
     <div className="resource-list">
       {accounts.length ? accounts.map((account) => <div className="resource-card" key={account.id}>
         <div><strong><Cloud size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{account.displayName}</strong><small>{account.provider} · {account.accountId} · {account.regions.join(", ") || "sem região definida"}</small></div>
+        <StatusTag status={healthTagStatus(account)} title={account.lastError ?? undefined} />
         <span className={account.enabled ? "status-tag enabled" : "status-tag disabled"}>{account.enabled ? "Ativa" : "Pausada"}</span>
         <div className="resource-actions">
+          <button className="ghost-button" onClick={() => void testConnection(account.id)} disabled={testingId === account.id}>{testingId === account.id ? "Testando..." : "Testar conexão"}</button>
           <button className="ghost-button" onClick={() => void toggle(account)}>{account.enabled ? "Pausar" : "Reativar"}</button>
           <button className="danger-button" onClick={() => void remove(account.id)}><Trash2 size={13} /> Remover</button>
         </div>

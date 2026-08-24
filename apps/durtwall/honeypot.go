@@ -23,6 +23,11 @@ import (
 type honeypotStrategy interface {
 	Respond(ctx context.Context, route *tenantRoute, request *http.Request, writer http.ResponseWriter) (statusCode int, err error)
 	Close()
+	// Healthy reports whether this honeypot strategy is actually able to answer a request right
+	// now - used by the fleet heartbeat (routing.go) to report DurtShield's status alongside
+	// DurtWall's own. syntheticHoneypot is in-process code with nothing separate to check; only
+	// dockerHoneypotManager (deception.go) has real infra that can be down.
+	Healthy(ctx context.Context) bool
 }
 
 // knownEndpoint is DurtShield's discovery data for one tenant (apps/api's `endpoints` table),
@@ -45,6 +50,10 @@ func newSyntheticHoneypot() *syntheticHoneypot {
 }
 
 func (*syntheticHoneypot) Close() {}
+
+// Always healthy: it's a pure function of the request and the tenant's known endpoints, no
+// external dependency to be down independent of the DurtWall process itself being up.
+func (*syntheticHoneypot) Healthy(context.Context) bool { return true }
 
 func (*syntheticHoneypot) Respond(_ context.Context, route *tenantRoute, request *http.Request, writer http.ResponseWriter) (int, error) {
 	var match *knownEndpoint

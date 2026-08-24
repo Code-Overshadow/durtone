@@ -118,6 +118,9 @@ export const cloudAccounts = pgTable('cloud_accounts', {
   credentialRef: text('credential_ref').notNull(),
   regions: jsonb('regions').$type<string[]>().default([]).notNull(),
   enabled: boolean('enabled').default(true).notNull(),
+  status: varchar('status', { length: 16 }).default('unknown').notNull(),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+  lastError: text('last_error'),
   lastScanAt: timestamp('last_scan_at', { withTimezone: true }),
   ...timestamps,
 }, (table) => ({
@@ -135,8 +138,19 @@ export const identityProviders = pgTable('identity_providers', {
   clientId: varchar('client_id', { length: 320 }),
   credentialRef: text('credential_ref').notNull(),
   enabled: boolean('enabled').default(true).notNull(),
+  status: varchar('status', { length: 16 }).default('unknown').notNull(),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+  lastError: text('last_error'),
   lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
   ...timestamps,
+});
+
+export const workerHeartbeats = pgTable('worker_heartbeats', {
+  service: varchar('service', { length: 32 }).primaryKey(),
+  status: varchar('status', { length: 16 }).notNull(),
+  detail: jsonb('detail').$type<Record<string, unknown>>().default({}).notNull(),
+  lastError: text('last_error'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 export const identities = pgTable('identities', {
