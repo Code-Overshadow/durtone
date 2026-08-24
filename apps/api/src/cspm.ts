@@ -18,23 +18,19 @@ export type CspmSummary = {
   drifts: CspmDrift[];
 };
 
-const baselineDrifts: CspmDrift[] = [
-  { kind: 'changed', resource: 'arn:aws:s3:::durtone-prod-assets', before: 'FAIL', after: 'PASS' },
-  { kind: 'new', resource: 'arn:aws:ec2:us-east-1:123456789012:instance/i-0a11223344', after: 'FAIL' },
-  { kind: 'missing', resource: 'arn:aws:iam::123456789012:role/legacy-admin', before: 'FAIL' },
-];
-
+/** No cloud account has been scanned yet for this tenant - nothing known to have failed, same
+ * "healthy until proven otherwise" default the waf/itdr pillars use in calculateSecurityScore. */
 export function getCspmSummary(): CspmSummary {
   return {
-    provider: 'aws',
-    accountId: '123456789012',
-    postureScore: 82,
-    totalChecks: 34,
-    passChecks: 27,
-    failChecks: 5,
-    criticalFindings: 2,
-    driftCount: baselineDrifts.length,
-    lastScanAt: new Date().toISOString(),
-    drifts: baselineDrifts,
+    provider: '',
+    accountId: '',
+    postureScore: 100,
+    totalChecks: 0,
+    passChecks: 0,
+    failChecks: 0,
+    criticalFindings: 0,
+    driftCount: 0,
+    lastScanAt: '',
+    drifts: [],
   };
 }
