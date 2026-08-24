@@ -5,6 +5,7 @@ import { AlertTriangle, Plus, Trash2, Users } from "lucide-react";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { notify } from "@/lib/toast-bus";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { CollapsibleForm, EmptyState, HelpCallout, SectionHeading, ServiceBackLink, StatusTag } from "@/components/dashboard-ui";
 
@@ -57,7 +58,7 @@ export default function ItdrSettingsPage() {
       void providersResource.refresh();
       // Testa a conexão automaticamente - sem isso o usuário fica sem saber se a credencial que
       // acabou de colar realmente funciona até o próximo ciclo do DurtScope (minutos depois).
-      void testConnection(created.id);
+      void testConnection(created.id, created.displayName);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível cadastrar o provedor de identidade");
     } finally {
@@ -92,12 +93,16 @@ export default function ItdrSettingsPage() {
     }
   }
 
-  async function testConnection(id: string) {
+  async function testConnection(id: string, displayName: string) {
     setTestingId(id);
     try {
       await apiPost(`/api/v1/identity-providers/${id}/test`, {});
-    } catch {
-      // status/lastError já foram persistidos pela API mesmo em caso de falha - o refresh mostra o resultado
+      notify(`Conexão com "${displayName}" verificada com sucesso.`, "success");
+    } catch (reason) {
+      // status/lastError também já foram persistidos pela API - o refresh abaixo atualiza o
+      // badge da linha - mas sem esse toast o usuário só descobre o resultado passando o mouse
+      // no badge, então mostra a mensagem amigável (já traduzida por extractErrorMessage) na hora.
+      notify(reason instanceof Error ? reason.message : `Não foi possível testar a conexão com "${displayName}".`, "error");
     } finally {
       setTestingId(null);
       void providersResource.refresh();
@@ -136,7 +141,7 @@ export default function ItdrSettingsPage() {
         <StatusTag status={healthTagStatus(provider)} title={provider.lastError ?? undefined} />
         <span className={provider.enabled ? "status-tag enabled" : "status-tag disabled"}>{provider.enabled ? "Ativo" : "Pausado"}</span>
         <div className="resource-actions">
-          <button className="ghost-button" onClick={() => void testConnection(provider.id)} disabled={testingId === provider.id}>{testingId === provider.id ? "Testando..." : "Testar conexão"}</button>
+          <button className="ghost-button" onClick={() => void testConnection(provider.id, provider.displayName)} disabled={testingId === provider.id}>{testingId === provider.id ? "Testando..." : "Testar conexão"}</button>
           <button className="ghost-button" onClick={() => void toggle(provider)}>{provider.enabled ? "Pausar" : "Reativar"}</button>
           <button className="danger-button" onClick={() => void remove(provider.id)}><Trash2 size={13} /> Remover</button>
         </div>

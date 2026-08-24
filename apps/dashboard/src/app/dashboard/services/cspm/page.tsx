@@ -5,6 +5,7 @@ import { AlertTriangle, Cloud, Plus, Trash2 } from "lucide-react";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
+import { notify } from "@/lib/toast-bus";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { CollapsibleForm, EmptyState, HelpCallout, SectionHeading, ServiceBackLink, StatusTag } from "@/components/dashboard-ui";
 
@@ -52,7 +53,7 @@ export default function CspmSettingsPage() {
       void accountsResource.refresh();
       // Testa a conexão automaticamente - sem isso o usuário fica sem saber se a credencial que
       // acabou de colar realmente funciona até o próximo ciclo do DurtGuardian (minutos depois).
-      void testConnection(created.id);
+      void testConnection(created.id, created.displayName);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível cadastrar a conta cloud");
     } finally {
@@ -80,12 +81,16 @@ export default function CspmSettingsPage() {
     }
   }
 
-  async function testConnection(id: string) {
+  async function testConnection(id: string, displayName: string) {
     setTestingId(id);
     try {
       await apiPost(`/api/v1/cloud-accounts/${id}/test`, {});
-    } catch {
-      // status/lastError já foram persistidos pela API mesmo em caso de falha - o refresh mostra o resultado
+      notify(`Conexão com "${displayName}" verificada com sucesso.`, "success");
+    } catch (reason) {
+      // status/lastError também já foram persistidos pela API - o refresh abaixo atualiza o
+      // badge da linha - mas sem esse toast o usuário só descobre o resultado passando o mouse
+      // no badge, então mostra a mensagem amigável (já traduzida por extractErrorMessage) na hora.
+      notify(reason instanceof Error ? reason.message : `Não foi possível testar a conexão com "${displayName}".`, "error");
     } finally {
       setTestingId(null);
       void accountsResource.refresh();
@@ -128,7 +133,7 @@ export default function CspmSettingsPage() {
         <StatusTag status={healthTagStatus(account)} title={account.lastError ?? undefined} />
         <span className={account.enabled ? "status-tag enabled" : "status-tag disabled"}>{account.enabled ? "Ativa" : "Pausada"}</span>
         <div className="resource-actions">
-          <button className="ghost-button" onClick={() => void testConnection(account.id)} disabled={testingId === account.id}>{testingId === account.id ? "Testando..." : "Testar conexão"}</button>
+          <button className="ghost-button" onClick={() => void testConnection(account.id, account.displayName)} disabled={testingId === account.id}>{testingId === account.id ? "Testando..." : "Testar conexão"}</button>
           <button className="ghost-button" onClick={() => void toggle(account)}>{account.enabled ? "Pausar" : "Reativar"}</button>
           <button className="danger-button" onClick={() => void remove(account.id)}><Trash2 size={13} /> Remover</button>
         </div>

@@ -5,6 +5,9 @@ import { ArrowUpRight, Shield } from "lucide-react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 function formatAuthError(reason: unknown) {
+  if (reason instanceof Error && (reason.name === "AbortError" || reason.name === "TimeoutError")) {
+    return "A conexão demorou muito para responder. Tente novamente.";
+  }
   const message = reason instanceof Error ? reason.message : typeof reason === "object" && reason !== null && "message" in reason ? String(reason.message) : "Não foi possível autenticar";
   if (message.includes("over_email_send_rate_limit")) return "O limite de envio de e-mails do Supabase foi atingido. Aguarde antes de tentar novamente ou desative a confirmação de e-mail no projeto de desenvolvimento.";
   return message;

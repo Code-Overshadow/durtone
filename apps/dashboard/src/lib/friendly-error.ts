@@ -14,6 +14,7 @@ const KNOWN_ERRORS: Entry[] = [
   { match: /invalid document number or legal name/i, pt: "CPF/CNPJ ou nome/razão social inválidos.", en: "Invalid document number or legal name." },
   { match: /the security token included in the request is invalid/i, pt: "As credenciais informadas não são válidas na AWS.", en: "The provided credentials are not valid in AWS." },
   { match: /token acquisition failed|token exchange failed/i, pt: "Não foi possível autenticar com as credenciais informadas.", en: "Could not authenticate with the provided credentials." },
+  { match: /InvalidSubscriptionId/i, pt: "O ID de subscription do Azure informado é inválido — confira se é o GUID da subscription, não o nome dela.", en: "The provided Azure subscription ID is invalid — check that it's the subscription's GUID, not its display name." },
   { match: /duplicate key value violates unique constraint/i, pt: "Esse registro já existe.", en: "This record already exists." },
   { match: /certificate (check|request) failed/i, pt: "Não foi possível verificar o certificado do domínio agora. Tente novamente em alguns minutos.", en: "Could not verify the domain certificate right now. Please try again in a few minutes." },
   { match: /credential encryption unavailable|credential_decryption_failed/i, pt: "O serviço de criptografia de credenciais está indisponível no momento.", en: "The credential encryption service is currently unavailable." },

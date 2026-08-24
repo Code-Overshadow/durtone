@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronLeft, ChevronUp, FileSearch, HelpCircle, RefreshCw } from "lucide-react";
 import { requestRefresh } from "@/lib/refresh-bus";
@@ -46,19 +46,34 @@ export function StatusTag({ status, title }: { status: "healthy" | "unhealthy" |
 /**
  * Recolhe o form de cadastro num resumo quando já existe pelo menos 1 registro, em vez de sempre
  * mostrar o formulário completo aberto - "Adicionar outro" reabre. Sem dados, começa aberto.
+ *
+ * `hasData` costuma chegar `false` no primeiro render (o fetch da lista ainda não resolveu) e só
+ * vira `true` depois - sem o efeito abaixo, o `useState` inicial já travava `open=true` pra sempre,
+ * mesmo com dados carregados. O efeito resincroniza `open` enquanto o usuário não tocou no
+ * toggle manualmente; depois de um clique manual, a escolha do usuário passa a valer.
  */
 export function CollapsibleForm({ hasData, title, summary, children }: { hasData: boolean; title: string; summary?: React.ReactNode; children: React.ReactNode }) {
   const [open, setOpen] = useState(!hasData);
+  const userToggled = useRef(false);
+
+  useEffect(() => {
+    if (!userToggled.current) setOpen(!hasData);
+  }, [hasData]);
+
+  function toggle(next: boolean) {
+    userToggled.current = true;
+    setOpen(next);
+  }
 
   if (!open) {
-    return <button type="button" className="collapsible-summary" onClick={() => setOpen(true)}>
+    return <button type="button" className="collapsible-summary" onClick={() => toggle(true)}>
       <span><strong>{title}</strong>{summary}</span>
       <span className="text-button"><ChevronDown size={14} /> Adicionar outro</span>
     </button>;
   }
 
   return <div className="collapsible-open">
-    {hasData && <button type="button" className="text-button collapsible-collapse" onClick={() => setOpen(false)}><ChevronUp size={14} /> Recolher</button>}
+    {hasData && <button type="button" className="text-button collapsible-collapse" onClick={() => toggle(false)}><ChevronUp size={14} /> Recolher</button>}
     {children}
   </div>;
 }
