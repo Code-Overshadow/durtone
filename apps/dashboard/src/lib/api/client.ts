@@ -1,5 +1,7 @@
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-import { getActiveTenantId } from "@/lib/active-tenant";
+import { getActiveCountry, getActiveTenantId } from "@/lib/active-tenant";
+import { friendlyError } from "@/lib/friendly-error";
+import { localeForCountry } from "@/lib/locale";
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
 
@@ -14,13 +16,14 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 async function extractErrorMessage(response: Response, path: string): Promise<string> {
+  const locale = localeForCountry(getActiveCountry());
   try {
     const body = (await response.clone().json()) as { error?: unknown };
-    if (typeof body.error === "string" && body.error) return body.error;
+    if (typeof body.error === "string" && body.error) return friendlyError(body.error, locale);
   } catch {
     // response wasn't JSON - fall through to the generic message below
   }
-  return `Serviço indisponível (${path})`;
+  return friendlyError(`Serviço indisponível (${path})`, locale);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

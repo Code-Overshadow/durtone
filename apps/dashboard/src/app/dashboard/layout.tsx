@@ -7,8 +7,9 @@ import { AlertTriangle, CheckCircle2, LogOut, Menu, RefreshCw, Shield, X } from 
 import { apiGet } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
+import { useIdleLogout } from "@/hooks/use-idle-logout";
 import { requestRefresh } from "@/lib/refresh-bus";
-import { getActiveTenantId, setActiveTenantId } from "@/lib/active-tenant";
+import { getActiveTenantId, setActiveCountry, setActiveTenantId } from "@/lib/active-tenant";
 import { LoginScreen } from "@/components/login-screen";
 import { OnboardingScreen } from "@/components/onboarding-screen";
 import { TenantSwitcher } from "@/components/tenant-switcher";
@@ -19,6 +20,7 @@ type TenantSettings = { settings?: { refreshIntervals?: Record<string, unknown> 
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { session, checkingSession, signOut } = useSupabaseSession();
+  useIdleLogout(() => void signOut());
   const [authError, setAuthError] = useState("");
   const [mobileNav, setMobileNav] = useState(false);
   const [creatingTenant, setCreatingTenant] = useState(false);
@@ -51,6 +53,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const storedTenantId = getActiveTenantId(userId);
   const activeTenantId = memberships.some((membership) => membership.tenantId === storedTenantId) ? storedTenantId! : memberships[0]!.tenantId;
   if (activeTenantId !== storedTenantId) setActiveTenantId(userId, activeTenantId);
+  setActiveCountry(memberships.find((membership) => membership.tenantId === activeTenantId)?.country ?? "BR");
 
   function switchTenant(tenantId: string) {
     setActiveTenantId(userId, tenantId);

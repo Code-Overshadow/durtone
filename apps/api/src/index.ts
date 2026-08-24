@@ -4,7 +4,7 @@ import { decryptSecret, encryptSecret } from '@durtone/crypto';
 import { buildIdentityProviderConfig, revokeIdentity, testConnection as testIdentityProviderConnection } from '@durtone/identity-providers';
 import { testCloudAccountConnection } from '@durtone/cloud-providers';
 import { getDiscoveryStats, ingestLogs, listEndpoints, listRequestLogs, replaceOpenApi } from './discovery';
-import { getWafConfig, mergePersistedConfig, updateWafConfig } from './config';
+import { configSchema, DEFAULT_WAF_CONFIG } from './config';
 import { listHoneytokenCallbacks, recordHoneytokenCallback } from './honeytokens';
 import { getCspmSummary } from './cspm';
 import { checkCertificate, deleteCertificate, FlyRateLimitError, requestCertificate, type FlyCertificateStatus } from './flyCerts';
@@ -25,6 +25,11 @@ const USER_ROLES = ['owner', 'admin', 'member'] as const;
 const CLOUD_PROVIDERS = ['aws', 'azure', 'gcp'] as const;
 const IDENTITY_PROVIDER_KINDS = ['keycloak', 'okta', 'aws', 'google'] as const;
 const REFRESH_INTERVAL_KEYS = ['stats', 'logs', 'endpoints', 'domains', 'cspm', 'itdr', 'security'] as const;
+const DOCUMENT_TYPES = ['cnpj', 'cpf'] as const;
+const COUNTRY_PATTERN = /^[A-Z]{2}$/;
+const CNPJ_DIGITS = /^\d{14}$/;
+const CPF_DIGITS = /^\d{11}$/;
+const CURRENT_TERMS_VERSION = 'draft-1';
 
 onEvent('waf.attack', async (event) => {
   if (!event.tenantId) return;
@@ -420,13 +425,13 @@ const app = new Elysia()
       return { error: tenant.error };
     }
     const persisted = await getPersistedConfig(tenant.tenantId);
-    if (!persisted) return getWafConfig();
-    return mergePersistedConfig({
+    if (!persisted) return DEFAULT_WAF_CONFIG;
+    return {
       upstream: persisted.upstream,
       mode: persisted.mode as 'block' | 'monitor',
       alertWebhookUrl: persisted.alertWebhookUrl ?? '',
       ...(persisted.settings ?? {}),
-    });
+    };
   })
   .put('/api/v1/config', async ({ body, request, set }) => {
     try {
@@ -435,7 +440,7 @@ const app = new Elysia()
         set.status = tenant.status;
         return { error: tenant.error };
       }
-      const response = updateWafConfig(body);
+      const response = configSchema.parse(body);
       await persistConfig(tenant.tenantId, {
         upstream: response.upstream,
         mode: response.mode,
@@ -457,7 +462,7 @@ const app = new Elysia()
     if (!userId || userId === 'fleet') {
       const fallbackId = process.env.DURTONE_TENANT_ID ?? '00000000-0000-0000-0000-000000000001';
       const fallbackTenant = await getTenant(fallbackId);
-      return { memberships: fallbackTenant ? [{ tenantId: fallbackTenant.id, name: fallbackTenant.name, slug: fallbackTenant.slug, role: 'owner' }] : [] };
+      return { memberships: fallbackTenant ? [{ tenantId: fallbackTenant.id, name: fallbackTenant.name, slug: fallbackTenant.slug, role: 'owner', country: fallbackTenant.country }] : [] };
     }
     return { memberships: (await listUserMemberships(userId)) ?? [] };
   })
@@ -473,13 +478,45 @@ const app = new Elysia()
       set.status = 503;
       return { error: 'tenant creation requires Supabase authentication' };
     }
-    const name = typeof (body as { name?: unknown })?.name === 'string' ? (body as { name: string }).name.trim() : '';
+    const input = body as { name?: unknown; country?: unknown; documentType?: unknown; documentNumber?: unknown; legalName?: unknown; termsAccepted?: unknown };
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
     if (!name || name.length > 160) {
       set.status = 400;
       return { error: 'tenant name is required' };
     }
+    const country = typeof input.country === 'string' ? input.country.toUpperCase() : 'BR';
+    if (!COUNTRY_PATTERN.test(country)) {
+      set.status = 400;
+      return { error: 'invalid country' };
+    }
+    if (input.termsAccepted !== true) {
+      set.status = 400;
+      return { error: 'terms_not_accepted' };
+    }
+    let documentType: string | undefined;
+    let documentNumber: string | undefined;
+    const legalName = typeof input.legalName === 'string' ? input.legalName.trim() : '';
+    if (country === 'BR') {
+      documentType = typeof input.documentType === 'string' ? input.documentType : '';
+      documentNumber = typeof input.documentNumber === 'string' ? input.documentNumber.replace(/\D/g, '') : '';
+      if (!DOCUMENT_TYPES.includes(documentType as typeof DOCUMENT_TYPES[number])) {
+        set.status = 400;
+        return { error: 'invalid document type' };
+      }
+      const digitsOk = documentType === 'cnpj' ? CNPJ_DIGITS.test(documentNumber) : CPF_DIGITS.test(documentNumber);
+      if (!digitsOk || !legalName) {
+        set.status = 400;
+        return { error: 'invalid document number or legal name' };
+      }
+    }
     const slug = await generateUniqueTenantSlug(name);
-    const tenant = await insertTenant(name, slug);
+    const tenant = await insertTenant(name, slug, {
+      country,
+      documentType,
+      documentNumber,
+      legalName: legalName || undefined,
+      termsVersion: CURRENT_TERMS_VERSION,
+    });
     if (!tenant) {
       set.status = 503;
       return { error: 'tenant storage is unavailable' };

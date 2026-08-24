@@ -7,12 +7,23 @@ import { calculateSecurityScore } from './securityScore';
 test('calculates the weighted unified security score', () => {
   const score = calculateSecurityScore({
     waf: { totalRequests: 100, blockedRequests: 80 },
-    cspm: { postureScore: 70 },
+    cspm: { postureScore: 70, totalChecks: 34 },
     itdr: { totalIdentities: 10, highRiskIdentities: 1, staleIdentities: 1 },
   });
 
   expect(score.components).toEqual({ waf: 80, cspm: 70, itdr: 80 });
   expect(score.score).toBe(77);
+  expect(score.configured).toBe(true);
+});
+
+test('reports configured:false when no pillar has any real data', () => {
+  const score = calculateSecurityScore({
+    waf: { totalRequests: 0, blockedRequests: 0 },
+    cspm: { postureScore: 100, totalChecks: 0 },
+    itdr: { totalIdentities: 0, highRiskIdentities: 0, staleIdentities: 0 },
+  });
+
+  expect(score.configured).toBe(false);
 });
 
 test('correlates blocked WAF traffic and Guardian changes to identities', () => {
@@ -26,7 +37,7 @@ test('publishes locally and generates a readable PDF', async () => {
   const received: string[] = [];
   onEvent('itdr.snapshot', (event) => { received.push(event.type); });
   await publishEvent({ type: 'itdr.snapshot', payload: { totalIdentities: 1 } });
-  const pdf = await buildExecutiveReport(calculateSecurityScore({ waf: { totalRequests: 0, blockedRequests: 0 }, cspm: { postureScore: 100 }, itdr: { totalIdentities: 0, highRiskIdentities: 0, staleIdentities: 0 } }));
+  const pdf = await buildExecutiveReport(calculateSecurityScore({ waf: { totalRequests: 0, blockedRequests: 0 }, cspm: { postureScore: 100, totalChecks: 0 }, itdr: { totalIdentities: 0, highRiskIdentities: 0, staleIdentities: 0 } }));
 
   expect(received).toEqual(['itdr.snapshot']);
   expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe('%PDF-');

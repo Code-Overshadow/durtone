@@ -22,6 +22,15 @@ export const tenants = pgTable('tenants', {
   name: varchar('name', { length: 160 }).notNull(),
   slug: varchar('slug', { length: 160 }).notNull().unique(),
   settings: jsonb('settings').$type<Record<string, unknown>>().default({}).notNull(),
+  // Dado minimo pra identificar o cliente (LGPD) - documentType/documentNumber ficam null pra
+  // conta internacional (CNPJ/CPF nao existe fora do Brasil). legalName e' a razao social (CNPJ)
+  // ou nome completo (CPF); pode ser null pra internacional, onde `name` ja basta.
+  country: varchar('country', { length: 2 }).default('BR').notNull(),
+  documentType: varchar('document_type', { length: 4 }),
+  documentNumber: varchar('document_number', { length: 32 }),
+  legalName: varchar('legal_name', { length: 200 }),
+  termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),
+  termsVersion: varchar('terms_version', { length: 16 }),
   ...timestamps,
 });
 

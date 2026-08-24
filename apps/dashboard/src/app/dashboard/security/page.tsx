@@ -7,11 +7,9 @@ import { useRefreshable } from "@/hooks/use-refreshable";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
 import { EmptyState, Metric, SectionHeading } from "@/components/dashboard-ui";
 
-type SecurityScore = { score: number; components: { waf: number; cspm: number; itdr: number }; weights: { waf: number; cspm: number; itdr: number } };
+type SecurityScore = { score: number; configured: boolean; components: { waf: number; cspm: number; itdr: number }; weights: { waf: number; cspm: number; itdr: number } };
 type CorrelationResult = { action: string; matches?: Array<{ name: string }>; attack?: { path?: string; remoteIp?: string }; change?: { resource?: string; kind?: string } };
 type Correlation = { id: string; source: string; result: CorrelationResult; createdAt: string };
-
-const emptyScore: SecurityScore = { score: 0, components: { waf: 0, cspm: 0, itdr: 0 }, weights: { waf: 0.4, cspm: 0.3, itdr: 0.3 } };
 
 function describeCorrelation(correlation: Correlation) {
   const { result } = correlation;
@@ -26,7 +24,7 @@ export default function SecurityPage() {
   const correlationsResource = usePollingResource(() => apiGet<{ correlations: Correlation[] }>("/api/v1/security/correlations"), { intervalMs: refreshIntervals.security });
   useRefreshable(() => { void securityScoreResource.refresh(); void correlationsResource.refresh(); });
 
-  const current = securityScoreResource.data ?? emptyScore;
+  const current = securityScoreResource.data;
   const correlations = correlationsResource.data?.correlations ?? [];
 
   async function downloadReport() {
@@ -45,15 +43,19 @@ export default function SecurityPage() {
 
   return <div className="content">
     <SectionHeading kicker="CORRELAÇÃO" title="Security Score unificado" description="WAF, postura cloud e higiene de identidades em uma única leitura." actions={<button className="primary-button" onClick={downloadReport}>Baixar relatório</button>} />
-    <section className="hero-strip">
-      <div><span className="section-kicker">POSTURA GERAL</span><h2>{current.score}/100</h2><p>Score calculado a partir da telemetria mais recente.</p></div>
-      <div className="hero-score"><span>Prioridade</span><strong>{current.score < 60 ? "Alta" : current.score < 80 ? "Média" : "Baixa"}</strong><small>risco agregado</small></div>
-    </section>
-    <div className="metric-grid">
-      <Metric label="DurtWall" value={current.components.waf} delta="eficácia WAF" icon={Shield} accent="teal" />
-      <Metric label="DurtGuardian" value={current.components.cspm} delta="postura CSPM" icon={Gauge} accent="mint" />
-      <Metric label="DurtScope" value={current.components.itdr} delta="higiene ITDR" icon={Activity} accent="yellow" />
-    </div>
+    {!current ? <section className="hero-strip"><div className="loader-line" /></section> : !current.configured ? <section className="hero-strip">
+      <div><span className="section-kicker">POSTURA GERAL</span><h2>Configure ao menos um serviço</h2><p>Nenhum dado real ainda — conecte o DurtWall, o DurtGuardian ou o DurtScope pra começar a medir sua postura.</p></div>
+    </section> : <>
+      <section className="hero-strip">
+        <div><span className="section-kicker">POSTURA GERAL</span><h2>{current.score}/100</h2><p>Score calculado a partir da telemetria mais recente.</p></div>
+        <div className="hero-score"><span>Prioridade</span><strong>{current.score < 60 ? "Alta" : current.score < 80 ? "Média" : "Baixa"}</strong><small>risco agregado</small></div>
+      </section>
+      <div className="metric-grid">
+        <Metric label="DurtWall" value={current.components.waf} delta="eficácia WAF" icon={Shield} accent="teal" />
+        <Metric label="DurtGuardian" value={current.components.cspm} delta="postura CSPM" icon={Gauge} accent="mint" />
+        <Metric label="DurtScope" value={current.components.itdr} delta="higiene ITDR" icon={Activity} accent="yellow" />
+      </div>
+    </>}
     <SectionHeading kicker="RESPOSTA A INCIDENTES" title="Correlações detectadas" count={`${correlations.length} recentes`} />
     <div className="panel table-panel">
       <div className="table-head"><span>Origem / detalhe</span><span>Ação</span><span>Identidades</span><span>Horário</span></div>

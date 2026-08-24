@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRefreshable } from "@/hooks/use-refreshable";
 
 type PollingOptions = {
   intervalMs?: number;
@@ -54,6 +55,13 @@ export function usePollingResource<T>(fetcher: () => Promise<T>, options: Pollin
       window.clearInterval(timer);
     };
   }, [enabled, intervalMs]);
+
+  // Sem isso, o botão "Atualizar" (e a troca de tenant, que também dispara requestRefresh) não
+  // alcançava a maioria dos recursos - cada página teria que lembrar de chamar useRefreshable
+  // manualmente. Agora todo usePollingResource responde por padrão.
+  useRefreshable(() => {
+    if (enabled) void refresh();
+  });
 
   return { data, loading, error, refresh };
 }

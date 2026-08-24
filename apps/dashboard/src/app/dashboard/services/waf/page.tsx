@@ -5,7 +5,7 @@ import { AlertTriangle, Check, Copy, Globe, RefreshCw, Save, Trash2 } from "luci
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { useEditableResource } from "@/hooks/use-editable-resource";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
-import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
+import { CollapsibleForm, EmptyState, HelpCallout, SectionHeading, ServiceBackLink } from "@/components/dashboard-ui";
 
 type Config = { upstream: string; mode: "block" | "monitor"; alertWebhookUrl?: string };
 type Tab = "config" | "domains";
@@ -42,7 +42,9 @@ function WafConfigTab() {
   });
   const { value: config, dirty, status, error, update, discard, save } = resource;
 
-  if (!config) return <EmptyState label="Carregando configuração..." />;
+  if (!config || status === "loading") return <div className="loader-line" />;
+
+  const hasData = Boolean(config.upstream);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -53,17 +55,19 @@ function WafConfigTab() {
     <HelpCallout title="Como funciona">
       Aponte o <strong>upstream</strong> para o endereço real da sua aplicação (ex.: <code>https://app-interna:3000</code>). Em <strong>Bloquear ameaças</strong> o DurtWall rejeita o tráfego malicioso; em <strong>Somente monitorar</strong> ele só registra, sem bloquear — use esse modo pra validar antes de ativar o bloqueio de verdade.
     </HelpCallout>
-    <form className="panel settings-panel" onSubmit={submit}>
-      <label>Upstream da aplicação<input type="url" value={config.upstream} onChange={(event) => update({ upstream: event.target.value })} required /></label>
-      <div><span className="field-label">Modo de operação</span><div className="segmented">{(["block", "monitor"] as const).map((mode) => <button type="button" key={mode} className={config.mode === mode ? "selected" : ""} onClick={() => update({ mode })}>{mode === "block" ? "Bloquear ameaças" : "Somente monitorar"}</button>)}</div></div>
-      <label>Webhook de alertas <span className="optional">opcional</span><input type="url" value={config.alertWebhookUrl ?? ""} onChange={(event) => update({ alertWebhookUrl: event.target.value })} placeholder="https://hooks.slack.com/..." /></label>
-      {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
-      <div className="form-actions">
-        <span className="muted">{dirty ? "Alterações não salvas." : "Configuração aplicada ao fleet do DurtWall na próxima sincronização."}</span>
-        {dirty && <button className="text-button" type="button" onClick={discard}>Descartar</button>}
-        <button className="primary-button" type="submit" disabled={status === "saving"}><Save size={16} /> {status === "saving" ? "Salvando..." : "Salvar configuração"}</button>
-      </div>
-    </form>
+    <CollapsibleForm hasData={hasData} title="Configuração do WAF" summary={<small className="muted">{config.upstream} · {config.mode === "block" ? "Bloqueando" : "Monitorando"}</small>}>
+      <form className="panel settings-panel" onSubmit={submit}>
+        <label>Upstream da aplicação<input type="url" value={config.upstream} onChange={(event) => update({ upstream: event.target.value })} required /></label>
+        <div><span className="field-label">Modo de operação</span><div className="segmented">{(["block", "monitor"] as const).map((mode) => <button type="button" key={mode} className={config.mode === mode ? "selected" : ""} onClick={() => update({ mode })}>{mode === "block" ? "Bloquear ameaças" : "Somente monitorar"}</button>)}</div></div>
+        <label>Webhook de alertas <span className="optional">opcional</span><input type="url" value={config.alertWebhookUrl ?? ""} onChange={(event) => update({ alertWebhookUrl: event.target.value })} placeholder="https://hooks.slack.com/..." /></label>
+        {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
+        <div className="form-actions">
+          <span className="muted">{dirty ? "Alterações não salvas." : "Configuração aplicada ao fleet do DurtWall na próxima sincronização."}</span>
+          {dirty && <button className="text-button" type="button" onClick={discard}>Descartar</button>}
+          <button className="primary-button" type="submit" disabled={status === "saving"}><Save size={16} /> {status === "saving" ? "Salvando..." : "Salvar configuração"}</button>
+        </div>
+      </form>
+    </CollapsibleForm>
   </>;
 }
 
@@ -108,14 +112,16 @@ function DomainsTab() {
     <HelpCallout title="Como apontar seu domínio">
       Cadastre o domínio abaixo, depois crie um registro <strong>CNAME</strong> na sua zona de DNS apontando pra <code>{EDGE_HOSTNAME}</code>. Assim que o DNS propagar, o status muda de &ldquo;Aguardando DNS&rdquo; pra &ldquo;Emitindo certificado&rdquo; e depois &ldquo;Ativo&rdquo; — automaticamente, sem nenhuma ação extra sua.
     </HelpCallout>
-    <form className="inline-form" onSubmit={submit}>
-      <label>Domínio<input value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder="app.seudominio.com" required /></label>
-      <div>
-        <span className="muted">Depois de cadastrar, aponte um registro CNAME desse domínio para</span> <CnameChip />
-      </div>
-      {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
-      <div className="form-actions"><span className="muted">Certificado TLS é emitido automaticamente assim que o DNS resolver.</span><button className="primary-button" type="submit" disabled={busy}>{busy ? "Cadastrando..." : "Adicionar domínio"}</button></div>
-    </form>
+    <CollapsibleForm hasData={domains.length > 0} title="Cadastrar domínio" summary={<small className="muted">{domains.length} cadastrado{domains.length === 1 ? "" : "s"}</small>}>
+      <form className="inline-form" onSubmit={submit}>
+        <label>Domínio<input value={hostname} onChange={(event) => setHostname(event.target.value)} placeholder="app.seudominio.com" required /></label>
+        <div>
+          <span className="muted">Depois de cadastrar, aponte um registro CNAME desse domínio para</span> <CnameChip />
+        </div>
+        {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
+        <div className="form-actions"><span className="muted">Certificado TLS é emitido automaticamente assim que o DNS resolver.</span><button className="primary-button" type="submit" disabled={busy}>{busy ? "Cadastrando..." : "Adicionar domínio"}</button></div>
+      </form>
+    </CollapsibleForm>
     <div className="resource-list">
       {domains.length ? domains.map((domain) => <div className="resource-card" key={domain.id}>
         <div><strong><Globe size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{domain.hostname}</strong><small>{domain.status === "error" && domain.errorMessage ? domain.errorMessage : "CNAME para " + EDGE_HOSTNAME}</small></div>

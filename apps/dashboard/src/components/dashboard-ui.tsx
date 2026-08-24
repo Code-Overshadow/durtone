@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, FileSearch, HelpCircle, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronUp, FileSearch, HelpCircle, RefreshCw } from "lucide-react";
 import { requestRefresh } from "@/lib/refresh-bus";
 
 export function EmptyState({ label }: { label: string }) {
@@ -40,6 +41,26 @@ const STATUS_TAG_LABEL: Record<string, string> = {
 
 export function StatusTag({ status, title }: { status: "healthy" | "unhealthy" | "pending" | "unknown"; title?: string }) {
   return <span className={`status-tag ${status}`} title={title}>{STATUS_TAG_LABEL[status]}</span>;
+}
+
+/**
+ * Recolhe o form de cadastro num resumo quando já existe pelo menos 1 registro, em vez de sempre
+ * mostrar o formulário completo aberto - "Adicionar outro" reabre. Sem dados, começa aberto.
+ */
+export function CollapsibleForm({ hasData, title, summary, children }: { hasData: boolean; title: string; summary?: React.ReactNode; children: React.ReactNode }) {
+  const [open, setOpen] = useState(!hasData);
+
+  if (!open) {
+    return <button type="button" className="collapsible-summary" onClick={() => setOpen(true)}>
+      <span><strong>{title}</strong>{summary}</span>
+      <span className="text-button"><ChevronDown size={14} /> Adicionar outro</span>
+    </button>;
+  }
+
+  return <div className="collapsible-open">
+    {hasData && <button type="button" className="text-button collapsible-collapse" onClick={() => setOpen(false)}><ChevronUp size={14} /> Recolher</button>}
+    {children}
+  </div>;
 }
 
 export function RefreshButton({ loading }: { loading: boolean }) {

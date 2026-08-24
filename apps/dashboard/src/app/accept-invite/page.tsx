@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Shield } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api/client";
 import { useSupabaseSession } from "@/hooks/use-supabase-session";
+import { notify } from "@/lib/toast-bus";
 import { LoginScreen } from "@/components/login-screen";
 
 type InvitationPreview = { tenantName: string; email: string; role: string; expired: boolean; accepted: boolean };
@@ -38,7 +39,10 @@ function AcceptInviteContent() {
     acceptedOnceRef.current = true;
     setAccepting(true);
     apiPost(`/api/v1/invitations/${token}/accept`)
-      .then(() => router.replace("/dashboard"))
+      .then(() => {
+        notify(`Convite aceito! Bem-vindo(a) a ${invitation.tenantName}.`, "success");
+        router.replace("/dashboard");
+      })
       .catch((reason) => {
         setError(reason instanceof Error ? reason.message : "Não foi possível aceitar o convite");
         setAccepting(false);

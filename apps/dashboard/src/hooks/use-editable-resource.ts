@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRefreshable } from "@/hooks/use-refreshable";
 
 type EditableResourceOptions<T> = {
   fetcher: () => Promise<T>;
@@ -42,6 +43,17 @@ export function useEditableResource<T>({ fetcher, saver }: EditableResourceOptio
   useEffect(() => {
     Promise.resolve().then(() => void refresh());
   }, []);
+
+  // Sem isso, o botão "Atualizar" e a troca de tenant nunca alcançavam este hook - ele só buscava
+  // uma vez no mount e nunca mais, deixando a aba mostrando o config do tenant anterior. Um
+  // draft não salvo é sempre descartado aqui (diferente do guard normal de refresh()): tanto
+  // "Atualizar" quanto trocar de tenant devem puxar o estado real do servidor, nunca preservar
+  // uma edição pendente que pode nem ser do tenant certo.
+  useRefreshable(() => {
+    dirtyRef.current = false;
+    setDirty(false);
+    void refresh();
+  });
 
   function update(patch: Partial<T> | ((value: T) => T)) {
     setDraft((current) => {

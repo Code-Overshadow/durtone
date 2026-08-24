@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { ToastHost } from "@/components/toast-host";
 import "./globals.css";
 
 type RootLayoutProps = Readonly<{
@@ -27,7 +28,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
       lang="pt-BR"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col"><ToastHost />{children}</body>
     </html>
   );
 }

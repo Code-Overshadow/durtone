@@ -64,6 +64,13 @@
       "when": 1787580606119,
       "tag": "0008_condemned_shatterstar",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787590051493,
+      "tag": "0009_sloppy_spiral",
+      "breakpoints": true
     }
   ]
 }

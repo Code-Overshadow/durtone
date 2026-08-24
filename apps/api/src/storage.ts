@@ -482,10 +482,15 @@ export type PersistedTenant = {
   name: string;
   slug: string;
   settings: Record<string, unknown>;
+  country: string;
+  documentType: string | null;
+  documentNumber: string | null;
+  legalName: string | null;
   createdAt: string;
 };
 
-const TENANT_COLUMNS = `id, name, slug, settings, created_at as "createdAt"`;
+const TENANT_COLUMNS = `id, name, slug, settings, country, document_type as "documentType",
+      document_number as "documentNumber", legal_name as "legalName", created_at as "createdAt"`;
 
 export async function getTenant(tenantId: string): Promise<PersistedTenant | undefined> {
   const client = database();
@@ -533,13 +538,23 @@ export async function generateUniqueTenantSlug(name: string): Promise<string> {
   }
 }
 
-export async function insertTenant(name: string, slug: string): Promise<PersistedTenant | undefined> {
+export type NewTenantInput = {
+  country: string;
+  documentType?: string;
+  documentNumber?: string;
+  legalName?: string;
+  termsVersion: string;
+};
+
+export async function insertTenant(name: string, slug: string, input: NewTenantInput): Promise<PersistedTenant | undefined> {
   const client = database();
   if (!client) return undefined;
-  const [row] = await client<PersistedTenant[]>`
-    insert into tenants (name, slug) values (${name}, ${slug})
-    returning id, name, slug, created_at as "createdAt"
-  `;
+  const [row] = await client.unsafe<PersistedTenant[]>(
+    `insert into tenants (name, slug, country, document_type, document_number, legal_name, terms_accepted_at, terms_version)
+     values ($1, $2, $3, $4, $5, $6, now(), $7)
+     returning ${TENANT_COLUMNS}`,
+    [name, slug, input.country, input.documentType ?? null, input.documentNumber ?? null, input.legalName ?? null, input.termsVersion],
+  );
   return row;
 }
 
@@ -555,13 +570,14 @@ export type UserMembership = {
   name: string;
   slug: string;
   role: string;
+  country: string;
 };
 
 export async function listUserMemberships(userId: string): Promise<UserMembership[] | undefined> {
   const client = database();
   if (!client) return undefined;
   return client<UserMembership[]>`
-    select t.id as "tenantId", t.name, t.slug, ut.role
+    select t.id as "tenantId", t.name, t.slug, ut.role, t.country
     from user_tenants ut
     join tenants t on t.id = ut.tenant_id
     where ut.user_id = ${userId}

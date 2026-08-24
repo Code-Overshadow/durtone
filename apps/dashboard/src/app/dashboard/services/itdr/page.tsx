@@ -6,7 +6,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api/client";
 import { usePollingResource } from "@/hooks/use-polling-resource";
 import { useRefreshable } from "@/hooks/use-refreshable";
 import { useDashboardShell } from "@/components/dashboard-shell-context";
-import { EmptyState, HelpCallout, SectionHeading, ServiceBackLink, StatusTag } from "@/components/dashboard-ui";
+import { CollapsibleForm, EmptyState, HelpCallout, SectionHeading, ServiceBackLink, StatusTag } from "@/components/dashboard-ui";
 
 type IdentityProvider = { id: string; kind: string; displayName: string; baseUrl: string | null; realmOrTenant: string | null; region: string | null; clientId: string | null; enabled: boolean; status: "healthy" | "error" | "unknown"; lastError: string | null };
 type Kind = "keycloak" | "okta" | "aws" | "google";
@@ -44,7 +44,7 @@ export default function ItdrSettingsPage() {
     setBusy(true);
     setError("");
     try {
-      await apiPost("/api/v1/identity-providers", {
+      const created = await apiPost<IdentityProvider>("/api/v1/identity-providers", {
         kind: form.kind,
         displayName: form.displayName.trim(),
         baseUrl: form.baseUrl.trim() || undefined,
@@ -55,6 +55,9 @@ export default function ItdrSettingsPage() {
       });
       setForm(emptyForm);
       void providersResource.refresh();
+      // Testa a conexão automaticamente - sem isso o usuário fica sem saber se a credencial que
+      // acabou de colar realmente funciona até o próximo ciclo do DurtScope (minutos depois).
+      void testConnection(created.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Não foi possível cadastrar o provedor de identidade");
     } finally {
@@ -97,26 +100,28 @@ export default function ItdrSettingsPage() {
     <HelpCallout title="O que o DurtScope faz">
       Conecta no seu provedor de identidade (Keycloak, Okta, AWS IAM ou Google Workspace) pra listar contas humanas e de serviço, calcular um risco por identidade e permitir revogação real quando algo parecer comprometido ou obsoleto.
     </HelpCallout>
-    <form className="inline-form" onSubmit={submit}>
-      <div className="form-grid">
-        <label>Provider<select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as Kind })}>
-          <option value="keycloak">Keycloak</option><option value="okta">Okta</option><option value="aws">AWS IAM</option><option value="google">Google Workspace</option>
-        </select></label>
-        <label>Nome de exibição<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} required /></label>
-        {form.kind !== "aws" && <label>Base URL<input type="url" value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} placeholder="https://identity.example.com" required={form.kind !== "google"} /></label>}
-        {form.kind === "aws" && <label>Região<input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} required /></label>}
-        {form.kind === "keycloak" && <><label>Realm<input value={form.realmOrTenant} onChange={(event) => setForm({ ...form, realmOrTenant: event.target.value })} required /></label><label>Client ID<input value={form.clientId} onChange={(event) => setForm({ ...form, clientId: event.target.value })} required /></label></>}
-        {form.kind === "google" && <label>Customer ID<input value={form.realmOrTenant} onChange={(event) => setForm({ ...form, realmOrTenant: event.target.value })} placeholder="my_customer" /></label>}
-        {form.kind === "keycloak" && <label>Client secret<input type="password" value={form.clientSecret} onChange={(event) => setForm({ ...form, clientSecret: event.target.value })} autoComplete="new-password" required /></label>}
-        {form.kind === "okta" && <label>API token<input type="password" value={form.apiToken} onChange={(event) => setForm({ ...form, apiToken: event.target.value })} autoComplete="new-password" required /></label>}
-        {form.kind === "aws" && <><label>Access key ID<input value={form.accessKeyId} onChange={(event) => setForm({ ...form, accessKeyId: event.target.value })} autoComplete="off" required /></label><label>Secret access key<input type="password" value={form.secretAccessKey} onChange={(event) => setForm({ ...form, secretAccessKey: event.target.value })} autoComplete="new-password" required /></label></>}
-        {form.kind === "google" && <label>Access token<input type="password" value={form.accessToken} onChange={(event) => setForm({ ...form, accessToken: event.target.value })} autoComplete="new-password" required /></label>}
-      </div>
-      {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
-      <div className="form-actions"><span className="muted">Credenciais são cifradas antes de persistir e nunca retornam nas respostas.</span><button className="primary-button" type="submit" disabled={busy}><Plus size={16} /> {busy ? "Cadastrando..." : "Adicionar provedor"}</button></div>
-    </form>
+    <CollapsibleForm hasData={providers.length > 0} title="Cadastrar provedor de identidade" summary={<small className="muted">{providers.length} cadastrado{providers.length === 1 ? "" : "s"}</small>}>
+      <form className="inline-form" onSubmit={submit}>
+        <div className="form-grid">
+          <label>Provider<select value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as Kind })}>
+            <option value="keycloak">Keycloak</option><option value="okta">Okta</option><option value="aws">AWS IAM</option><option value="google">Google Workspace</option>
+          </select></label>
+          <label>Nome de exibição<input value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} required /></label>
+          {form.kind !== "aws" && <label>Base URL<input type="url" value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} placeholder="https://identity.example.com" required={form.kind !== "google"} /></label>}
+          {form.kind === "aws" && <label>Região<input value={form.region} onChange={(event) => setForm({ ...form, region: event.target.value })} required /></label>}
+          {form.kind === "keycloak" && <><label>Realm<input value={form.realmOrTenant} onChange={(event) => setForm({ ...form, realmOrTenant: event.target.value })} required /></label><label>Client ID<input value={form.clientId} onChange={(event) => setForm({ ...form, clientId: event.target.value })} required /></label></>}
+          {form.kind === "google" && <label>Customer ID<input value={form.realmOrTenant} onChange={(event) => setForm({ ...form, realmOrTenant: event.target.value })} placeholder="my_customer" /></label>}
+          {form.kind === "keycloak" && <label>Client secret<input type="password" value={form.clientSecret} onChange={(event) => setForm({ ...form, clientSecret: event.target.value })} autoComplete="new-password" required /><small className="muted">O DurtScope sincroniza via OAuth2 client_credentials, que exige um client confidencial (com secret) no Keycloak — clients públicos não autenticam nesse fluxo de máquina-a-máquina.</small></label>}
+          {form.kind === "okta" && <label>API token<input type="password" value={form.apiToken} onChange={(event) => setForm({ ...form, apiToken: event.target.value })} autoComplete="new-password" required /></label>}
+          {form.kind === "aws" && <><label>Access key ID<input value={form.accessKeyId} onChange={(event) => setForm({ ...form, accessKeyId: event.target.value })} autoComplete="off" required /></label><label>Secret access key<input type="password" value={form.secretAccessKey} onChange={(event) => setForm({ ...form, secretAccessKey: event.target.value })} autoComplete="new-password" required /></label></>}
+          {form.kind === "google" && <label>Access token<input type="password" value={form.accessToken} onChange={(event) => setForm({ ...form, accessToken: event.target.value })} autoComplete="new-password" required /></label>}
+        </div>
+        {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
+        <div className="form-actions"><span className="muted">Credenciais são cifradas antes de persistir e nunca retornam nas respostas.</span><button className="primary-button" type="submit" disabled={busy}><Plus size={16} /> {busy ? "Cadastrando..." : "Adicionar provedor"}</button></div>
+      </form>
+    </CollapsibleForm>
     <div className="resource-list">
-      {providers.length ? providers.map((provider) => <div className="resource-card" key={provider.id}>
+      {providersResource.loading && !providersResource.data ? <div className="loader-line" /> : providers.length ? providers.map((provider) => <div className="resource-card" key={provider.id}>
         <div><strong><Users size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{provider.displayName}</strong><small>{KIND_LABEL[provider.kind] ?? provider.kind}{provider.realmOrTenant ? ` · ${provider.realmOrTenant}` : ""}</small></div>
         <StatusTag status={healthTagStatus(provider)} title={provider.lastError ?? undefined} />
         <span className={provider.enabled ? "status-tag enabled" : "status-tag disabled"}>{provider.enabled ? "Ativo" : "Pausado"}</span>
