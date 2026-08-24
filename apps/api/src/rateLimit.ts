@@ -5,6 +5,7 @@ const windowSeconds = Number(process.env.DURTONE_RATE_LIMIT_WINDOW_SECONDS ?? 60
 const maxRequests = Number(process.env.DURTONE_RATE_LIMIT_MAX ?? 120);
 let localRedis: Redis | undefined;
 let upstashRedis: UpstashRedis | undefined;
+let warnedNoRedis = false;
 
 function getRedis() {
   if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
@@ -21,7 +22,10 @@ function getRedis() {
 export async function allowRequest(key: string) {
   const redis = getRedis();
   if (!redis) {
-    if (process.env.NODE_ENV === 'production') throw new Error('Redis is required in production');
+    if (!warnedNoRedis) {
+      warnedNoRedis = true;
+      console.warn('rateLimit: no Redis configured, allowing all requests unthrottled (fail-open)');
+    }
     return true;
   }
 
