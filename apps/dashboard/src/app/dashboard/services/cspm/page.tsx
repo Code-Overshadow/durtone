@@ -61,13 +61,23 @@ export default function CspmSettingsPage() {
   }
 
   async function toggle(account: CloudAccount) {
-    await apiPut(`/api/v1/cloud-accounts/${account.id}`, { displayName: account.displayName, regions: account.regions, enabled: !account.enabled });
-    void accountsResource.refresh();
+    setError("");
+    try {
+      await apiPut(`/api/v1/cloud-accounts/${account.id}`, { displayName: account.displayName, regions: account.regions, enabled: !account.enabled });
+      void accountsResource.refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível atualizar a conta cloud");
+    }
   }
 
   async function remove(id: string) {
-    await apiDelete(`/api/v1/cloud-accounts/${id}`);
-    void accountsResource.refresh();
+    setError("");
+    try {
+      await apiDelete(`/api/v1/cloud-accounts/${id}`);
+      void accountsResource.refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível remover a conta cloud");
+    }
   }
 
   async function testConnection(id: string) {
@@ -108,10 +118,10 @@ export default function CspmSettingsPage() {
           </>}
           {form.provider === "gcp" && <label>JSON da service account<textarea value={form.serviceAccountJson} onChange={(event) => setForm({ ...form, serviceAccountJson: event.target.value })} placeholder='{"type": "service_account", "client_email": "...", "private_key": "...", ...}' rows={4} required /></label>}
         </div>
-        {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
         <div className="form-actions"><span className="muted">Credenciais são cifradas antes de persistir e nunca retornam nas respostas.</span><button className="primary-button" type="submit" disabled={busy}><Plus size={16} /> {busy ? "Cadastrando..." : "Adicionar conta"}</button></div>
       </form>
     </CollapsibleForm>
+    {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
     <div className="resource-list">
       {accountsResource.loading && !accountsResource.data ? <div className="loader-line" /> : accounts.length ? accounts.map((account) => <div className="resource-card" key={account.id}>
         <div><strong><Cloud size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{account.displayName}</strong><small>{account.provider} · {account.accountId} · {account.regions.join(", ") || "sem região definida"}</small></div>

@@ -94,15 +94,23 @@ function DomainsTab() {
   }
 
   async function remove(id: string) {
-    await apiDelete(`/api/v1/domains/${id}`);
-    refreshDomains();
+    setError("");
+    try {
+      await apiDelete(`/api/v1/domains/${id}`);
+      refreshDomains();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível remover o domínio");
+    }
   }
 
   async function recheck(id: string) {
     setRecheckingId(id);
+    setError("");
     try {
       await apiPost(`/api/v1/domains/${id}/recheck`);
       refreshDomains();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível reverificar o domínio");
     } finally {
       setRecheckingId(null);
     }
@@ -118,10 +126,10 @@ function DomainsTab() {
         <div>
           <span className="muted">Depois de cadastrar, aponte um registro CNAME desse domínio para</span> <CnameChip />
         </div>
-        {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
         <div className="form-actions"><span className="muted">Certificado TLS é emitido automaticamente assim que o DNS resolver.</span><button className="primary-button" type="submit" disabled={busy}>{busy ? "Cadastrando..." : "Adicionar domínio"}</button></div>
       </form>
     </CollapsibleForm>
+    {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
     <div className="resource-list">
       {domains.length ? domains.map((domain) => <div className="resource-card" key={domain.id}>
         <div><strong><Globe size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{domain.hostname}</strong><small>{domain.status === "error" && domain.errorMessage ? domain.errorMessage : "CNAME para " + EDGE_HOSTNAME}</small></div>

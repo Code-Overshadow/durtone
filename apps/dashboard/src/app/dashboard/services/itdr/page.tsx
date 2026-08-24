@@ -66,20 +66,30 @@ export default function ItdrSettingsPage() {
   }
 
   async function toggle(provider: IdentityProvider) {
-    await apiPut(`/api/v1/identity-providers/${provider.id}`, {
-      displayName: provider.displayName,
-      baseUrl: provider.baseUrl ?? undefined,
-      realmOrTenant: provider.realmOrTenant ?? undefined,
-      region: provider.region ?? undefined,
-      clientId: provider.clientId ?? undefined,
-      enabled: !provider.enabled,
-    });
-    void providersResource.refresh();
+    setError("");
+    try {
+      await apiPut(`/api/v1/identity-providers/${provider.id}`, {
+        displayName: provider.displayName,
+        baseUrl: provider.baseUrl ?? undefined,
+        realmOrTenant: provider.realmOrTenant ?? undefined,
+        region: provider.region ?? undefined,
+        clientId: provider.clientId ?? undefined,
+        enabled: !provider.enabled,
+      });
+      void providersResource.refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível atualizar o provedor de identidade");
+    }
   }
 
   async function remove(id: string) {
-    await apiDelete(`/api/v1/identity-providers/${id}`);
-    void providersResource.refresh();
+    setError("");
+    try {
+      await apiDelete(`/api/v1/identity-providers/${id}`);
+      void providersResource.refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível remover o provedor de identidade");
+    }
   }
 
   async function testConnection(id: string) {
@@ -116,10 +126,10 @@ export default function ItdrSettingsPage() {
           {form.kind === "aws" && <><label>Access key ID<input value={form.accessKeyId} onChange={(event) => setForm({ ...form, accessKeyId: event.target.value })} autoComplete="off" required /></label><label>Secret access key<input type="password" value={form.secretAccessKey} onChange={(event) => setForm({ ...form, secretAccessKey: event.target.value })} autoComplete="new-password" required /></label></>}
           {form.kind === "google" && <label>Access token<input type="password" value={form.accessToken} onChange={(event) => setForm({ ...form, accessToken: event.target.value })} autoComplete="new-password" required /></label>}
         </div>
-        {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
         <div className="form-actions"><span className="muted">Credenciais são cifradas antes de persistir e nunca retornam nas respostas.</span><button className="primary-button" type="submit" disabled={busy}><Plus size={16} /> {busy ? "Cadastrando..." : "Adicionar provedor"}</button></div>
       </form>
     </CollapsibleForm>
+    {error && <div className="notice error"><AlertTriangle size={16} />{error}</div>}
     <div className="resource-list">
       {providersResource.loading && !providersResource.data ? <div className="loader-line" /> : providers.length ? providers.map((provider) => <div className="resource-card" key={provider.id}>
         <div><strong><Users size={13} style={{ marginRight: 6, verticalAlign: "-2px" }} />{provider.displayName}</strong><small>{KIND_LABEL[provider.kind] ?? provider.kind}{provider.realmOrTenant ? ` · ${provider.realmOrTenant}` : ""}</small></div>
